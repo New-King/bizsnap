@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# env
+.env
+.env.local
+
+# build
+dist/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# xcodegen 生成物（改 project.yml 后重跑 xcodegen）
+BizSnap/BizSnap/Info.plist
+
+# database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# logs
+*.log
+
+# macOS
+.DS_Store
