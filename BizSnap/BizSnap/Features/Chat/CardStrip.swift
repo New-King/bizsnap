@@ -23,7 +23,7 @@ struct CardStrip: View {
                 activeRow
             }
 
-            if let error, !folded {
+            if let error {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 11))

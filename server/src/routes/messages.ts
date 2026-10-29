@@ -98,40 +98,46 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
   return sseResponse(signal, async (send) => {
     send({ type: 'start', threadId, messageId: assistantId });
 
-    const stream = await bizAgent.stream(
-      [{ role: 'user', content }],
-      {
-        instructions: buildPrompt(),
-        memory: { thread: threadId, resource: RESOURCE_ID },
-        requestContext,
-        // 允许「查人 → 查历史 → 出卡片」多步推理
-        maxSteps: 5,
-      },
-    );
-
     let reply = '';
     const cards: CardDraft[] = [];
 
-    for await (const chunk of stream.fullStream) {
-      if (signal.aborted) break;
+    try {
+      const stream = await bizAgent.stream(
+        [{ role: 'user', content }],
+        {
+          instructions: buildPrompt(),
+          memory: { thread: threadId, resource: RESOURCE_ID },
+          requestContext,
+          // 允许「查人 → 查历史 → 出卡片」多步推理
+          maxSteps: 5,
+        },
+      );
 
-      if (chunk.type === 'text-delta') {
-        const delta = chunk.payload?.text ?? '';
-        if (delta) {
-          reply += delta;
-          send({ type: 'text', delta });
-        }
-        continue;
-      }
+      for await (const chunk of stream.fullStream) {
+        if (signal.aborted) break;
 
-      // 卡片不等整段文字结束：工具一返回就推给前端
-      if (chunk.type === 'tool-result') {
-        const payload = chunk.payload as { toolName?: string; result?: { card?: CardDraft } };
-        if (payload.toolName && DRAFT_TOOLS.has(payload.toolName) && payload.result?.card) {
-          cards.push(payload.result.card);
-          send({ type: 'card', card: payload.result.card });
+        if (chunk.type === 'text-delta') {
+          const delta = chunk.payload?.text ?? '';
+          if (delta) {
+            reply += delta;
+            send({ type: 'text', delta });
+          }
+          continue;
+        }
+
+        // 卡片不等整段文字结束：工具一返回就推给前端
+        if (chunk.type === 'tool-result') {
+          const payload = chunk.payload as { toolName?: string; result?: { card?: CardDraft } };
+          if (payload.toolName && DRAFT_TOOLS.has(payload.toolName) && payload.result?.card) {
+            cards.push(payload.result.card);
+            send({ type: 'card', card: payload.result.card });
+          }
         }
       }
+    } catch (error) {
+      // 这一轮没成功：撤掉用户消息，客户端重试时不会在库里叠出两条
+      await deleteMessage(userMessageId);
+      throw error;
     }
 
     if (signal.aborted) {

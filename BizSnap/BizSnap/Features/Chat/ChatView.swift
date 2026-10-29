@@ -48,7 +48,7 @@ struct ChatView: View {
                                     .id(message.id)
                             }
 
-                            if sending {
+                            if sending || !streamingText.isEmpty {
                                 streamingBubble
                             }
 
@@ -404,6 +404,7 @@ struct ChatView: View {
         streamingText = ""
         streamingCards = []
         errorText = nil
+        var streamFailed = false
 
         do {
             try await client.sendStreaming(
@@ -419,13 +420,20 @@ struct ChatView: View {
                     streamingCards.append(card)
                 case .done(let message, _, _):
                     if let message { messages.append(message) }
+                    // 同一轮更新里清空，避免正式消息和流式气泡同时出现
+                    streamingText = ""
+                    streamingCards = []
                 case .failed(let message):
                     errorText = message
+                    streamFailed = true
                 default:
                     break
                 }
             }
-            lastFailed = nil
+            lastFailed = streamFailed ? (content, imageBase64) : nil
+            if streamFailed, !streamingText.isEmpty {
+                messages.append(.localAssistant(text: streamingText))
+            }
         } catch {
             errorText = error.localizedDescription
             lastFailed = (content, imageBase64)
@@ -490,6 +498,7 @@ struct ChatView: View {
                     if !final.isEmpty {
                         messages.append(.localAssistant(text: final))
                     }
+                    streamingText = ""
                     if !contactName.isEmpty { title = contactName }
 
                 case .failed(let message):
