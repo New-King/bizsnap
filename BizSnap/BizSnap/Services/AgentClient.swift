@@ -108,12 +108,14 @@ final class AgentClient: ObservableObject {
         try decoder.decode([ChatMessage].self, from: await perform("/api/threads/\(threadId)/messages"))
     }
 
-    func send(
+    /// 发消息：服务端返回 SSE，边收帧边回调；返回时流已结束
+    func sendStreaming(
         threadId: String,
         text: String,
         imageBase64: String?,
-        snapshot: [ContactSnapshot]
-    ) async throws -> ChatMessage {
+        snapshot: [ContactSnapshot],
+        onEvent: @escaping (StreamEvent) -> Void
+    ) async throws {
         var body: [String: Any] = [:]
         if !text.isEmpty { body["text"] = text }
         if let imageBase64 { body["imageBase64"] = imageBase64 }
@@ -126,18 +128,17 @@ final class AgentClient: ObservableObject {
                 return dict
             }
         }
-
-        let data = try await perform(
-            "/api/threads/\(threadId)/messages",
-            method: "POST",
-            body: jsonBody(body)
-        )
-        return try decoder.decode(SendMessageResponse.self, from: data).message
+        try await stream(path: "/api/threads/\(threadId)/messages", body: jsonBody(body), onEvent: onEvent)
     }
 
     // MARK: - 确认
 
-    func confirm(threadId: String, cards: [ActionCard]) async throws -> ConfirmResponse {
+    /// 确认：先到 `written`，随后洞察逐字流回来
+    func confirmStreaming(
+        threadId: String,
+        cards: [ActionCard],
+        onEvent: @escaping (StreamEvent) -> Void
+    ) async throws {
         let payload = cards.map { card -> [String: Any] in
             var dict: [String: Any] = ["id": card.id, "kind": card.kind.rawValue]
             if let reason = card.reason { dict["reason"] = reason }
@@ -145,8 +146,55 @@ final class AgentClient: ObservableObject {
             return dict
         }
         let body = try JSONSerialization.data(withJSONObject: ["cards": payload])
-        let data = try await perform("/api/threads/\(threadId)/confirm", method: "POST", body: body)
-        return try decoder.decode(ConfirmResponse.self, from: data)
+        try await stream(path: "/api/threads/\(threadId)/confirm", body: body, onEvent: onEvent)
+    }
+
+    // MARK: - SSE
+
+    /// 按行读 `data:`；头部状态码非 2xx 时退回普通 JSON 错误体
+    private func stream(
+        path: String,
+        body: Data?,
+        onEvent: @escaping (StreamEvent) -> Void
+    ) async throws {
+        guard let url = URL(string: path, relativeTo: baseURL) else {
+            throw APIError(message: "服务地址无效")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.httpBody = body
+
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw APIError(message: "网络异常")
+            }
+            if http.statusCode >= 400 {
+                var raw = Data()
+                for try await byte in bytes { raw.append(byte) }
+                if let payload = try? decoder.decode([String: JSONValue].self, from: raw),
+                   let message = payload["error"]?.stringValue {
+                    throw APIError(message: message)
+                }
+                throw APIError(message: "服务返回 \(http.statusCode)")
+            }
+
+            online = true
+            for try await line in bytes.lines {
+                if Task.isCancelled { break }
+                if let event = SSEParser.event(from: line, decoder: decoder) {
+                    onEvent(event)
+                }
+            }
+        } catch let error as APIError {
+            online = false
+            throw error
+        } catch {
+            online = false
+            throw APIError(message: "连接中断：\(error.localizedDescription)")
+        }
     }
 
     // MARK: - 演示数据

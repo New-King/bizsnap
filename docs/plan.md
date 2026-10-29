@@ -51,7 +51,8 @@ bizsnap/
 │   ├── .env.example
 │   └── src/
 │       ├── index.ts         Hono 应用、CORS、body limit 12mb、统一 onError、`serve()` 启动
-│       ├── sse.ts           SSE 帧写法（`data:` 行、`: ping` 心跳）
+│       ├── sse.ts           SSE 帧写法（`data:` 行 + `withSseHeartbeat` 心跳）
+│       ├── http.ts          readJson / zod 校验转 400
 │       ├── config.ts        环境变量校验、时区 Asia/Shanghai、默认会议 60 分钟
 │       ├── types.ts         ContactRecord / Attribute / Interaction / CardDraft / ChatMessage
 │       ├── db/
@@ -317,9 +318,9 @@ export const bizAgent = new Agent({
 | `text` | `{ delta }` | 增量文本，客户端自行拼接 |
 | `card` | `{ card }` | 出卡工具一返回就推，早于文字结束 |
 | `done` | `{ message }` 或 `{ insight, contactName }` | 结束帧，正文以它为准覆盖增量 |
-| `error` | `{ message }` | 中途失败；客户端保留已收片段并给「重试」 |
+| `error` | `{ error }` | 中途失败；客户端保留已收片段并给「重试」 |
 
-- 每 15 秒发一行 `: ping` 注释帧，防止中间层把长连接掐掉
+- 心跳用 `@mastra/ai-sdk` 的 `withSseHeartbeat(response, 15000)`：空闲时在两帧之间插 `: heartbeat` 注释，不打断帧
 - 客户端断开 → 服务端停止消费上游、删掉本轮用户消息，不写 assistant 消息
 - 卡片不等整段文字结束：用户看到卡片的时机从「回复结束」提前到「工具返回」
 

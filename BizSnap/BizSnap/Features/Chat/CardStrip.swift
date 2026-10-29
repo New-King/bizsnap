@@ -4,6 +4,8 @@ import SwiftUI
 struct CardStrip: View {
     let card: ActionCard
     let selectable: Bool
+    /// 流式过程中刚冒出来的卡：正常亮度但不可点
+    var pending: Bool = false
     let isSelected: Bool
     let error: String?
     let onToggle: () -> Void
@@ -70,7 +72,7 @@ struct CardStrip: View {
         }
         .buttonStyle(.plain)
         .disabled(!selectable)
-        .opacity(selectable ? 1 : 0.4)
+        .opacity(selectable || pending ? 1 : 0.4)
         .onChange(of: isSelected) { _, value in
             guard value else {
                 withAnimation(.easeOut(duration: 0.18)) { pulse = false }

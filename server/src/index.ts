@@ -1,43 +1,55 @@
-import cors from 'cors';
-import express, { type NextFunction, type Request, type Response } from 'express';
+import { serve } from '@hono/node-server';
+import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { cors } from 'hono/cors';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { HTTPException } from 'hono/http-exception';
 import { config } from './config.js';
 import { ensureSchema } from './db/schema.js';
-import { confirmRouter } from './routes/confirm.js';
-import { demoRouter } from './routes/demo.js';
-import { messagesRouter } from './routes/messages.js';
-import { threadsRouter } from './routes/threads.js';
+import { confirmRoutes } from './routes/confirm.js';
+import { demoRoutes } from './routes/demo.js';
+import { messageRoutes } from './routes/messages.js';
+import { threadRoutes } from './routes/threads.js';
 
-const app = express();
+const app = new Hono();
 
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use('*', cors());
+app.use(
+  '/api/*',
+  bodyLimit({
+    maxSize: 12 * 1024 * 1024,
+    onError: (c) => c.json({ error: '请求体过大（上限 12MB），截图请先压缩' }, 413),
+  }),
+);
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, model: config.modelId, time: new Date().toISOString() });
-});
+app.get('/api/health', (c) =>
+  c.json({ ok: true, model: config.modelId, time: new Date().toISOString() }),
+);
 
-app.use('/api', demoRouter);
-app.use('/api', threadsRouter);
-app.use('/api', messagesRouter);
-app.use('/api', confirmRouter);
+app.route('/api', demoRoutes);
+app.route('/api', threadRoutes);
+app.route('/api', messageRoutes);
+app.route('/api', confirmRoutes);
 
-app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  const err = error as { status?: number; message?: string; issues?: unknown };
-  const status = err.status ?? 500;
+app.notFound((c) => c.json({ error: '接口不存在' }, 404));
+
+app.onError((error, c) => {
+  const status = (error instanceof HTTPException
+    ? error.status
+    : ((error as { status?: number }).status ?? 500)) as ContentfulStatusCode;
+
   if (status >= 500) {
     console.error('[bizsnap] 请求失败：', error);
   }
-  res.status(status).json({
-    error: err.message ?? '服务端错误',
-    issues: err.issues,
-  });
+  return c.json({ error: error.message || '服务端错误' }, status);
 });
 
 async function main(): Promise<void> {
   await ensureSchema();
   // 提前加载 agent，把配置错误暴露在启动阶段
   await import('./mastra/index.js');
-  app.listen(config.port, () => {
+
+  serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1' }, () => {
     console.log(`[bizsnap] 服务已启动 http://127.0.0.1:${config.port}`);
     console.log(`[bizsnap] 数据库 ${config.dbFile}`);
   });

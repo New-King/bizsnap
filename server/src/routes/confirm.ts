@@ -1,10 +1,13 @@
-import { Router } from 'express';
+import { Hono } from 'hono';
 import { z } from 'zod';
 import { markCardsConfirmed } from '../db/threads.js';
+import { parse, readJson } from '../http.js';
 import { confirmCards } from '../services/confirm.js';
+import { streamInsight } from '../services/insight.js';
+import { sseResponse } from '../sse.js';
 import type { CardDraft } from '../types.js';
 
-export const confirmRouter = Router();
+export const confirmRoutes = new Hono();
 
 const cardSchema = z.object({
   id: z.string(),
@@ -15,16 +18,32 @@ const cardSchema = z.object({
 
 const confirmSchema = z.object({ cards: z.array(cardSchema).min(1) });
 
-confirmRouter.post('/threads/:id/confirm', async (req, res, next) => {
-  try {
-    const body = confirmSchema.parse(req.body ?? {});
-    const result = await confirmCards(req.params.id, body.cards as unknown as CardDraft[]);
+confirmRoutes.post('/threads/:id/confirm', async (c) => {
+  const threadId = c.req.param('id');
+  const body = parse(confirmSchema, await readJson(c));
+  const cards = body.cards as unknown as CardDraft[];
+  const signal = c.req.raw.signal;
 
-    const done = result.written.filter((item) => item.ok).map((item) => item.cardId);
-    await markCardsConfirmed(req.params.id, done);
+  return sseResponse(signal, async (send) => {
+    // 1. 落库（事务在 confirmCards 里），2. 标记卡片已确认
+    const result = await confirmCards(threadId, cards);
+    await markCardsConfirmed(
+      threadId,
+      result.written.filter((item) => item.ok).map((item) => item.cardId),
+    );
 
-    res.json(result);
-  } catch (error) {
-    next(error);
-  }
+    // 事务提交后才告诉客户端：此时可以开始写系统通讯录 / 日历
+    send({ type: 'written', written: result.written, contactName: result.contactName });
+
+    if (!result.insightSource || signal.aborted) {
+      send({ type: 'done', insight: '', contactName: result.contactName });
+      return;
+    }
+
+    // 洞察逐字流出，不阻塞客户端的系统写入
+    const insight = await streamInsight(result.insightSource, (delta) => send({ type: 'text', delta }));
+    if (!signal.aborted) {
+      send({ type: 'done', insight, contactName: result.contactName });
+    }
+  });
 });

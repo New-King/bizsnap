@@ -40,10 +40,6 @@ struct SendMessageRequest: Codable {
     var contactsSnapshot: [ContactSnapshot]?
 }
 
-struct SendMessageResponse: Codable {
-    let message: ChatMessage
-}
-
 struct WrittenCard: Codable, Hashable {
     let cardId: String
     let kind: String
@@ -51,13 +47,6 @@ struct WrittenCard: Codable, Hashable {
     let background: String
     let ok: Bool
     let error: String?
-}
-
-struct ConfirmResponse: Codable {
-    let ok: Bool
-    let written: [WrittenCard]
-    let insight: String
-    let contactName: String
 }
 
 struct SeedResult: Codable {

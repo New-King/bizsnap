@@ -22,7 +22,7 @@ import type {
 } from '../types.js';
 import { applyChange, currentValue, localDate } from './attributes.js';
 import { buildSearchColumns, computeContactEmbedding } from './embedding.js';
-import { generateInsight } from './insight.js';
+import type { InsightSource } from './insight.js';
 
 const ATTR_FIELDS: [keyof CreateContactPayload, AttributeType][] = [
   ['industry', 'industry'],
@@ -124,7 +124,13 @@ function applyFields(
 export async function confirmCards(
   threadId: string,
   cards: CardDraft[],
-): Promise<{ ok: boolean; written: WrittenCard[]; insight: string; contactName: string }> {
+): Promise<{
+  ok: boolean;
+  written: WrittenCard[];
+  contactName: string;
+  /** 洞察的输入；没有主联系人时为 null */
+  insightSource: InsightSource | null;
+}> {
   const thread = await getThread(threadId);
   if (!thread) {
     throw Object.assign(new Error('会话不存在'), { status: 404 });
@@ -374,20 +380,24 @@ export async function confirmCards(
     error: plan.error,
   }))];
 
-  let insight = '';
+  // 洞察留给路由去流式生成，这里只准备输入
+  let insightSource: InsightSource | null = null;
   if (primary) {
     const events = await listInteractions(primary.id, 8);
     const writtenInteractionIds = new Set(
       plans.filter((plan) => plan.contact?.id === primary.id).map((plan) => plan.interaction?.id),
     );
-    const justWritten = events.filter((event) => writtenInteractionIds.has(event.id));
-    insight = await generateInsight(primary, events, justWritten);
+    insightSource = {
+      contact: primary,
+      events,
+      justWritten: events.filter((event) => writtenInteractionIds.has(event.id)),
+    };
   }
 
   return {
     ok: written.every((item) => item.ok),
     written,
-    insight,
     contactName: primary?.name ?? thread.contactName,
+    insightSource,
   };
 }

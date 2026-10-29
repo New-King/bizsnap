@@ -16,6 +16,9 @@ struct ChatView: View {
 
     @State private var sending = false
     @State private var confirming = false
+    /// 流式中的正文与卡片：done 到达后整段换成落库的消息
+    @State private var streamingText = ""
+    @State private var streamingCards: [ActionCard] = []
     @State private var errorText: String?
     @State private var localErrors: [String: String] = [:]
 
@@ -46,7 +49,7 @@ struct ChatView: View {
                             }
 
                             if sending {
-                                skeleton
+                                streamingBubble
                             }
 
                             if let errorText {
@@ -68,8 +71,11 @@ struct ChatView: View {
                     .onChange(of: sending) { _, isSending in
                         guard isSending else { return }
                         withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("skeleton", anchor: .bottom)
+                            proxy.scrollTo("stream-end", anchor: .bottom)
                         }
+                    }
+                    .onChange(of: streamingText) { _, _ in
+                        proxy.scrollTo("stream-end", anchor: .bottom)
                     }
                 }
 
@@ -238,7 +244,50 @@ struct ChatView: View {
         .frame(maxWidth: 300, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.surface.opacity(0.5)))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .id("skeleton")
+    }
+
+    /// 流式中的临时气泡：先骨架，收到第一个字就换成真实气泡，卡片随工具返回冒出
+    @ViewBuilder
+    private var streamingBubble: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if streamingText.isEmpty && streamingCards.isEmpty {
+                skeleton
+            } else {
+                if !streamingText.isEmpty {
+                    HStack(alignment: .bottom, spacing: 5) {
+                        Text(streamingText)
+                            .font(.system(size: 15))
+                            .foregroundStyle(Theme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Rectangle()
+                            .fill(Theme.accentSoft)
+                            .frame(width: 2, height: 15)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.surface))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                    )
+                    .frame(maxWidth: 300, alignment: .leading)
+                }
+
+                ForEach(streamingCards) { card in
+                    CardStrip(
+                        card: card,
+                        selectable: false,
+                        pending: true,
+                        isSelected: false,
+                        error: nil,
+                        onToggle: {},
+                        onRetry: {}
+                    )
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .id("stream-end")
     }
 
     private var confirmBar: some View {
@@ -338,7 +387,7 @@ struct ChatView: View {
         image = nil
         selected.removeAll()
 
-        await deliver(text: content, imageBase64: base64)
+        await runStream(text: content, imageBase64: base64)
     }
 
     private func retryLast() async {
@@ -346,26 +395,49 @@ struct ChatView: View {
             await reloadMessages()
             return
         }
-        await deliver(text: lastFailed.text, imageBase64: lastFailed.imageBase64)
+        await runStream(text: lastFailed.text, imageBase64: lastFailed.imageBase64)
     }
 
-    private func deliver(text content: String, imageBase64: String?) async {
+    /// 一条流：边收边渲染，`done` 到了才落成正式消息
+    private func runStream(text content: String, imageBase64: String?) async {
         sending = true
+        streamingText = ""
+        streamingCards = []
+        errorText = nil
+
         do {
-            let reply = try await client.send(
+            try await client.sendStreaming(
                 threadId: thread.id,
                 text: content,
                 imageBase64: imageBase64,
                 snapshot: snapshot
-            )
-            messages.append(reply)
-            errorText = nil
+            ) { event in
+                switch event {
+                case .text(let delta):
+                    streamingText += delta
+                case .card(let card):
+                    streamingCards.append(card)
+                case .done(let message, _, _):
+                    if let message { messages.append(message) }
+                case .failed(let message):
+                    errorText = message
+                default:
+                    break
+                }
+            }
             lastFailed = nil
         } catch {
             errorText = error.localizedDescription
             lastFailed = (content, imageBase64)
+            // 已经吐出来的片段留着，标成未完成，别让用户白等一场
+            if !streamingText.isEmpty {
+                messages.append(.localAssistant(text: streamingText))
+            }
         }
+
         sending = false
+        streamingText = ""
+        streamingCards = []
     }
 
     private func reloadMessages() async {
@@ -393,37 +465,57 @@ struct ChatView: View {
         let cards = selectableCards.filter { selected.contains($0.id) }
         guard !cards.isEmpty else { return }
         confirming = true
-        defer { confirming = false }
+        streamingText = ""
+        errorText = nil
 
         do {
-            let result = try await client.confirm(threadId: thread.id, cards: cards)
-            let writtenIds = Set(result.written.filter(\.ok).map(\.cardId))
-            markConfirmed(writtenIds)
+            try await client.confirmStreaming(threadId: thread.id, cards: cards) { event in
+                switch event {
+                case .written(let written, let contactName):
+                    // 事务已提交：先把卡片折叠掉，再去写系统通讯录 / 日历
+                    let okIds = Set(written.filter(\.ok).map(\.cardId))
+                    markConfirmed(okIds)
+                    for item in written where !item.ok {
+                        localErrors[item.cardId] = item.error ?? "写入失败"
+                    }
+                    if !contactName.isEmpty { title = contactName }
+                    let targets = cards.filter { okIds.contains($0.id) }
+                    Task { await writeToSystem(targets) }
 
-            for item in result.written where !item.ok {
-                localErrors[item.cardId] = item.error ?? "写入失败"
-            }
+                case .text(let delta):
+                    streamingText += delta
 
-            // 服务端落库成功后，逐张写进系统通讯录 / 日历；单张失败只标红该卡
-            for card in cards where writtenIds.contains(card.id) {
-                do {
-                    _ = try await CardExecutor.execute(card)
-                    localErrors[card.id] = nil
-                } catch {
-                    localErrors[card.id] = error.localizedDescription
+                case .done(_, let insight, let contactName):
+                    let final = (insight?.isEmpty == false ? insight! : streamingText)
+                    if !final.isEmpty {
+                        messages.append(.localAssistant(text: final))
+                    }
+                    if !contactName.isEmpty { title = contactName }
+
+                case .failed(let message):
+                    errorText = message
+
+                default:
+                    break
                 }
             }
-
-            if !result.insight.isEmpty {
-                messages.append(.localAssistant(text: result.insight))
-            }
-            if !result.contactName.isEmpty {
-                title = result.contactName
-            }
             selected.removeAll()
-            errorText = nil
         } catch {
             errorText = error.localizedDescription
+        }
+
+        confirming = false
+        streamingText = ""
+    }
+
+    private func writeToSystem(_ cards: [ActionCard]) async {
+        for card in cards {
+            do {
+                _ = try await CardExecutor.execute(card)
+                localErrors[card.id] = nil
+            } catch {
+                localErrors[card.id] = error.localizedDescription
+            }
         }
     }
 

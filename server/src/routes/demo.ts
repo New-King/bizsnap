@@ -1,21 +1,11 @@
-import { Router } from 'express';
+import { Hono } from 'hono';
 import { resetDemo, seedDemo } from '../services/demo-seed.js';
 
-export const demoRouter = Router();
+export const demoRoutes = new Hono();
 
-demoRouter.post('/demo/seed', async (_req, res, next) => {
-  try {
-    res.json(await seedDemo());
-  } catch (error) {
-    next(error);
-  }
-});
+demoRoutes.post('/demo/seed', async (c) => c.json(await seedDemo()));
 
-demoRouter.post('/demo/reset', async (_req, res, next) => {
-  try {
-    await resetDemo();
-    res.json({ ok: true });
-  } catch (error) {
-    next(error);
-  }
+demoRoutes.post('/demo/reset', async (c) => {
+  await resetDemo();
+  return c.json({ ok: true });
 });
