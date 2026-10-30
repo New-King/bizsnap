@@ -7,9 +7,12 @@ struct CardStrip: View {
     /// 流式过程中刚冒出来的卡：正常亮度但不可点
     var pending: Bool = false
     let isSelected: Bool
-    let error: String?
+    /// 是否真的写进了系统通讯录 / 日历（服务端已确认 ≠ 系统已写入）
+    var systemWritten: Bool = true
+    let error: CardFailure?
     let onToggle: () -> Void
     let onRetry: () -> Void
+    var onOpenSettings: (() -> Void)? = nil
 
     @State private var pulse = false
 
@@ -27,10 +30,16 @@ struct CardStrip: View {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(.system(size: 11))
-                    Text(error)
+                    Text(error.message)
                         .font(.system(size: 12))
                         .lineLimit(2)
                     Spacer(minLength: 4)
+                    // 权限被关掉时重试必然失败，直接给出去设置的入口
+                    if error.needsSettings, let onOpenSettings {
+                        Button("去设置", action: onOpenSettings)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.accentSoft)
+                    }
                     Button("重试", action: onRetry)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.accentSoft)
@@ -82,21 +91,37 @@ struct CardStrip: View {
         }
     }
 
+    /// 折叠后的状态话术：只有真的写进系统才敢说「已写入」
+    private var foldedText: String {
+        switch (systemWritten, card.kind == .createMeeting) {
+        case (true, true): return "已写入日历"
+        case (true, false): return "已写入通讯录"
+        case (false, true): return "已确认，未写入日历"
+        case (false, false): return "已确认，未写入通讯录"
+        }
+    }
+
     private var foldedRow: some View {
         HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill")
+            Image(systemName: systemWritten ? "checkmark.circle.fill" : "exclamationmark.circle")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.green)
-            Text(card.kind == .createMeeting ? "已写入日历" : "已写入通讯录")
+                .foregroundStyle(systemWritten ? Theme.green : Theme.orange)
+            Text(foldedText)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Theme.textSecondary)
             Spacer(minLength: 8)
-            Text(card.kind.label)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Theme.textTertiary)
+            if systemWritten {
+                Text(card.kind.label)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+            } else {
+                Button("写入", action: onRetry)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.accentSoft)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

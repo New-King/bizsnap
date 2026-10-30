@@ -99,3 +99,10 @@ struct ActionCard: Codable, Identifiable, Hashable {
         }
     }
 }
+
+/// 写系统（通讯录 / 日历）失败时给用户看的信息。
+/// `needsSettings` 为真表示权限被用户关掉了：重试不会有变化，只能去设置里打开。
+struct CardFailure: Equatable {
+    let message: String
+    let needsSettings: Bool
+}

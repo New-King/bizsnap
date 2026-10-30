@@ -30,7 +30,9 @@ struct ChatView: View {
     @State private var streamingText = ""
     @State private var streamingCards: [ActionCard] = []
     @State private var errorText: String?
-    @State private var localErrors: [String: String] = [:]
+    @State private var localErrors: [String: CardFailure] = [:]
+    /// 真的写进系统的卡片；服务端 confirmed 只是业务库已落库
+    @State private var writtenIds: Set<String> = SystemWriteLog.ids
 
     @State private var title = ""
     @State private var photoItem: PhotosPickerItem?
@@ -251,9 +253,11 @@ struct ChatView: View {
                         card: card,
                         selectable: isSelectable(card),
                         isSelected: selected.contains(card.id),
+                        systemWritten: writtenIds.contains(card.id),
                         error: localErrors[card.id],
                         onToggle: { toggle(card) },
-                        onRetry: { Task { await retryLocal(card) } }
+                        onRetry: { Task { await retryLocal(card) } },
+                        onOpenSettings: { openSettings() }
                     )
                 }
             }
@@ -573,7 +577,10 @@ struct ChatView: View {
                     let okIds = Set(written.filter(\.ok).map(\.cardId))
                     markConfirmed(okIds)
                     for item in written where !item.ok {
-                        localErrors[item.cardId] = item.error ?? "写入失败"
+                        localErrors[item.cardId] = CardFailure(
+                            message: item.error ?? "写入失败",
+                            needsSettings: false
+                        )
                     }
                     let targets = cards.filter { okIds.contains($0.id) }
                     Task { await writeToSystem(targets) }
@@ -606,22 +613,40 @@ struct ChatView: View {
 
     private func writeToSystem(_ cards: [ActionCard]) async {
         for card in cards {
-            do {
-                _ = try await CardExecutor.execute(card)
-                localErrors[card.id] = nil
-            } catch {
-                localErrors[card.id] = error.localizedDescription
-            }
+            await write(card)
         }
     }
 
     private func retryLocal(_ card: ActionCard) async {
+        // 权限还没打开时重试一定失败，直接带去设置页，省一次无效点击
+        guard !CardExecutor.needsSettings(for: card) else {
+            openSettings()
+            return
+        }
+        await write(card)
+    }
+
+    private func write(_ card: ActionCard) async {
         do {
             _ = try await CardExecutor.execute(card)
             localErrors[card.id] = nil
+            writtenIds.insert(card.id)
         } catch {
-            localErrors[card.id] = error.localizedDescription
+            record(error, for: card.id)
         }
+    }
+
+    /// 权限类错误单独标出来，界面上换成「去设置」
+    private func record(_ error: Error, for cardId: String) {
+        localErrors[cardId] = CardFailure(
+            message: error.localizedDescription,
+            needsSettings: error is SystemAccessError
+        )
+    }
+
+    private func openSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 }
 
