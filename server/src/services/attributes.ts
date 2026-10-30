@@ -41,9 +41,12 @@ export function applyChange(
     return attributes;
   }
 
+  // 同一天内又改了一次：from 会晚于「前一天」，闭区间倒挂，收敛成当天有效
+  const closedTo = dayBefore(date);
+  const closedFrom = existing.since;
   const history = [
     ...existing.history,
-    { from: existing.since, to: dayBefore(date), value: existing.value },
+    { from: closedFrom, to: closedTo < closedFrom ? closedFrom : closedTo, value: existing.value },
   ];
   return attributes.map((attr) =>
     attr.type === type ? { type, value, since: date, history: collapse(history) } : attr,
@@ -93,7 +96,7 @@ export function renderTimeline(contact: ContactRecord): string {
     const seg = attr.history
       .slice()
       .sort((a, b) => (a.from < b.from ? -1 : 1))
-      .map((h) => `${h.from} 至 ${h.to} 为 ${h.value}`)
+      .map((h) => (h.from === h.to ? `${h.from} 为 ${h.value}` : `${h.from} 至 ${h.to} 为 ${h.value}`))
       .join('；');
     lines.push(seg ? `${label}：现为 ${attr.value}（${attr.since} 起）；此前 ${seg}` : `${label}：${attr.value}（${attr.since} 起）`);
   }

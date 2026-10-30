@@ -66,12 +66,23 @@ export function buildSearchColumns(contact: {
   return { searchCurrent: current, searchHistory: history };
 }
 
-/** 一人一条向量：当前值与历史值拼成一句 */
+/**
+ * 向量只描述「这个人现在是什么样」：姓名 + 5 个当前值。
+ * 历史段不进向量 —— 一条向量只能代表一个主题，塞进多段旧值会把每段都稀释；
+ * 往事交给 search_interactions 走关键词查事件记录。
+ * 电话、邮箱是精确查找的活，进向量只是噪音，一起排除。
+ */
+export function embeddingTextOf(contact: { name: string; attributes: Attribute[] }): string {
+  const values = contact.attributes.map((attr) => attr.value).filter(Boolean);
+  return [contact.name, ...values].filter(Boolean).join(' ').trim();
+}
+
+/** 一人一条向量：只嵌当前状态 */
 export async function computeContactEmbedding(contact: {
-  searchCurrent: string;
-  searchHistory: string;
+  name: string;
+  attributes: Attribute[];
 }): Promise<string | null> {
-  const text = [contact.searchCurrent, contact.searchHistory].filter(Boolean).join(' ').trim();
+  const text = embeddingTextOf(contact);
   if (!text) return null;
   try {
     const vector = await embedText(text);
@@ -83,5 +94,5 @@ export async function computeContactEmbedding(contact: {
 }
 
 export function contactToEmbeddingInput(contact: ContactRecord): string {
-  return [contact.searchCurrent, contact.searchHistory].filter(Boolean).join(' ');
+  return embeddingTextOf(contact);
 }

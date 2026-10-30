@@ -6,6 +6,7 @@ import { createContact } from './tools/create-contact.js';
 import { createMeeting } from './tools/create-meeting.js';
 import { getContactHistory } from './tools/get-history.js';
 import { searchContact } from './tools/search-contact.js';
+import { searchInteractions } from './tools/search-interactions.js';
 import { updateContact } from './tools/update-contact.js';
 
 /**
@@ -22,6 +23,7 @@ export const bizAgent = new Agent({
   // key 就是模型看到的工具名，与 inputSchema 的描述保持一致
   tools: {
     search_contact: searchContact,
+    search_interactions: searchInteractions,
     get_contact_history: getContactHistory,
     create_contact: createContact,
     update_contact: updateContact,

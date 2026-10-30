@@ -171,6 +171,67 @@ export async function searchByEmbedding(
   return scored.slice(0, limit);
 }
 
+export type InteractionHit = Interaction & {
+  contactName: string;
+  /** 命中的关键词片段数，用于排序 */
+  hits: number;
+};
+
+/**
+ * 事件检索：拿关键词片段在 background / meeting 上做子串匹配。
+ * 中文不分词，靠 2-gram 片段命中；命中片段越多排越前，同分按时间倒序。
+ * 往事只在这里找，不进向量 —— 向量只管「这人现在是什么样」。
+ */
+export async function searchInteractionsByKeywords(
+  keywords: string[],
+  limit = 8,
+  exec: Executor = defaultExec,
+): Promise<InteractionHit[]> {
+  const grams = [...new Set(keywords.map((k) => k.trim()).filter((k) => k.length >= 2))];
+  if (!grams.length) return [];
+
+  const where = grams.map(() => '(i.background LIKE ? OR i.meeting LIKE ?)').join(' OR ');
+  const args: string[] = [];
+  for (const gram of grams) {
+    args.push(`%${gram}%`, `%${gram}%`);
+  }
+
+  const { rows } = await exec.execute({
+    sql: `SELECT i.*, c.name AS contact_name
+      FROM interactions i
+      LEFT JOIN contacts c ON c.id = i.contact_id
+      WHERE ${where}
+      ORDER BY i.at DESC
+      LIMIT 200`,
+    args,
+  });
+
+  const scored = rows.map((row) => {
+    const background = str(row.background);
+    const meeting = str(row.meeting);
+    const haystack = `${background} ${meeting}`;
+    const hits = grams.filter((gram) => haystack.includes(gram)).length;
+    return {
+      interaction: {
+        id: str(row.id),
+        contactId: str(row.contact_id),
+        groupId: str(row.group_id),
+        at: str(row.at),
+        kind: str(row.kind) as Interaction['kind'],
+        source: str(row.source) as Interaction['source'],
+        attrs: JSON.parse(str(row.attrs) || '[]') as string[],
+        background,
+        meeting: row.meeting ? (JSON.parse(meeting) as Interaction['meeting']) : undefined,
+      } satisfies Interaction,
+      contactName: str(row.contact_name),
+      hits,
+    };
+  });
+
+  scored.sort((a, b) => (b.hits - a.hits) || (a.interaction.at < b.interaction.at ? 1 : -1));
+  return scored.slice(0, limit).map((item) => ({ ...item.interaction, contactName: item.contactName, hits: item.hits }));
+}
+
 export async function insertInteraction(
   interaction: Interaction,
   exec: Executor = defaultExec,

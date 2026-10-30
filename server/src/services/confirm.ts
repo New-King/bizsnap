@@ -358,7 +358,7 @@ export async function confirmCards(
   }
   for (const contact of affected.values()) {
     const columns = buildSearchColumns(contact);
-    const embedding = await computeContactEmbedding(columns);
+    const embedding = await computeContactEmbedding(contact);
     await saveContact({ ...contact, ...columns, embedding, updatedAt: at });
   }
 
