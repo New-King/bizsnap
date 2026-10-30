@@ -1,6 +1,7 @@
 import EventKit
 import PhotosUI
 import SwiftUI
+import UIKit
 
 struct ChatView: View {
     let thread: ThreadSummary
@@ -88,7 +89,9 @@ struct ChatView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 16)
                     }
-                    .scrollDismissesKeyboard(.interactively)
+                    // 拖动立刻收键盘；点空白处也收，但不抢消息里的点击
+                    .scrollDismissesKeyboard(.immediately)
+                    .simultaneousGesture(TapGesture().onEnded { hideKeyboard() })
                     .onChange(of: messages.count) { _, _ in
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo(messages.last?.id, anchor: .bottom)
@@ -189,6 +192,7 @@ struct ChatView: View {
     private var navigationBar: some View {
         HStack(spacing: 12) {
             Button {
+                hideKeyboard()
                 onOpenDrawer()
             } label: {
                 Image(systemName: "line.3.horizontal")
@@ -431,7 +435,18 @@ struct ChatView: View {
         snapshot = ContactsService.shared.snapshot()
     }
 
+    /// 收起键盘：输入栏以外的点击、发送之后都要收
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+
     private func sendMessage() async {
+        hideKeyboard()
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let base64 = image.flatMap { ImageCompressor.jpegBase64($0) }
         guard !content.isEmpty || base64 != nil else { return }

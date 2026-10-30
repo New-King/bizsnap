@@ -8,8 +8,21 @@ struct Composer: View {
     let onPickPhoto: () -> Void
     let onCamera: () -> Void
 
+    @FocusState private var focused: Bool
+
     private var canSend: Bool {
         !sending && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || image != nil)
+    }
+
+    private var showClear: Bool {
+        focused || !text.isEmpty || image != nil
+    }
+
+    /// 清空本轮输入并收起键盘
+    private func clear() {
+        text = ""
+        image = nil
+        focused = false
     }
 
     var body: some View {
@@ -68,7 +81,21 @@ struct Composer: View {
                     .font(.system(size: 15))
                     .foregroundStyle(Theme.textPrimary)
                     .padding(.vertical, 9)
-                    .frame(minHeight: 36, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+                    // TextField 默认只有文字那一行吃点击，这里把整块矩形（含上下留白）都算作热区
+                    .contentShape(Rectangle())
+                    .focused($focused)
+
+                if showClear {
+                    Button(action: clear) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 17))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 28, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("清空并收起键盘")
+                }
 
                 Button(action: onSend) {
                     ZStack {
@@ -91,14 +118,29 @@ struct Composer: View {
             .padding(.leading, 6)
             .padding(.trailing, 8)
             .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Theme.elevated)
-            )
+            // 整条输入栏里的空白处也响应点击，子按钮（相册 / 清空 / 发送）仍优先
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .onTapGesture { focused = true }
+            .composerBackground()
             .padding(.horizontal, 14)
             .padding(.top, 6)
         }
         // 背景铺到屏幕底部，避免安全区下露出一条色带
         .background(Theme.background.ignoresSafeArea(edges: .bottom))
+    }
+}
+
+private extension View {
+    /// iOS 26 用系统的 Liquid Glass，低版本退回实色底
+    @ViewBuilder
+    func composerBackground() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        } else {
+            self.background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Theme.elevated)
+            )
+        }
     }
 }
