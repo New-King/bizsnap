@@ -108,7 +108,7 @@ struct ChatView: View {
                     }
                 }
 
-                if !selected.isEmpty {
+                if !pickedCards.isEmpty {
                     confirmBar
                 }
 
@@ -249,7 +249,7 @@ struct ChatView: View {
                 ForEach(cards) { card in
                     CardStrip(
                         card: card,
-                        selectable: isSelectable(card, in: message),
+                        selectable: isSelectable(card),
                         isSelected: selected.contains(card.id),
                         error: localErrors[card.id],
                         onToggle: { toggle(card) },
@@ -346,7 +346,7 @@ struct ChatView: View {
                     ProgressView().tint(.white)
                 } else {
                     Image(systemName: "checkmark.circle.fill")
-                    Text("确认选中 \(selected.count) 项")
+                    Text("确认选中 \(pickedCards.count) 项")
                         .font(.system(size: 15, weight: .semibold))
                 }
             }
@@ -363,19 +363,33 @@ struct ChatView: View {
 
     // MARK: - 卡片状态
 
-    private var latestCardMessageId: String? {
-        messages.last(where: \.hasCards)?.id
+    /// 每种卡片只认最后一张：补一轮信息后同类卡让位，不同类型互不影响
+    /// （同一轮只出会议卡时，上一轮那张联系人卡仍然可勾选）
+    private var latestCardIdByKind: [CardKind: String] {
+        var result: [CardKind: String] = [:]
+        for message in messages where message.hasCards {
+            for card in message.cards ?? [] where card.confirmed != true {
+                result[card.kind] = card.id
+            }
+        }
+        return result
     }
 
-    private func isSelectable(_ card: ActionCard, in message: ChatMessage) -> Bool {
-        guard card.confirmed != true else { return false }
-        return message.id == latestCardMessageId && !confirming
+    private func isSelectable(_ card: ActionCard) -> Bool {
+        guard card.confirmed != true, !confirming else { return false }
+        return latestCardIdByKind[card.kind] == card.id
     }
 
     private var selectableCards: [ActionCard] {
-        guard let id = latestCardMessageId,
-              let message = messages.first(where: { $0.id == id }) else { return [] }
-        return (message.cards ?? []).filter { $0.confirmed != true }
+        let latest = latestCardIdByKind
+        return messages
+            .flatMap { $0.cards ?? [] }
+            .filter { $0.confirmed != true && latest[$0.kind] == $0.id }
+    }
+
+    /// 已勾选且仍有效的卡：被新卡取代的旧卡不计入，也不参与提交
+    private var pickedCards: [ActionCard] {
+        selectableCards.filter { selected.contains($0.id) }
     }
 
     private func toggle(_ card: ActionCard) {
@@ -533,7 +547,7 @@ struct ChatView: View {
     }
 
     private func confirmSelected() async {
-        let cards = selectableCards.filter { selected.contains($0.id) }
+        let cards = pickedCards
         guard !cards.isEmpty else { return }
 
         let needsCalendar = cards.contains { $0.kind == .createMeeting }
@@ -545,7 +559,7 @@ struct ChatView: View {
     }
 
     private func performConfirm() async {
-        let cards = selectableCards.filter { selected.contains($0.id) }
+        let cards = pickedCards
         guard !cards.isEmpty else { return }
         confirming = true
         streamingText = ""
