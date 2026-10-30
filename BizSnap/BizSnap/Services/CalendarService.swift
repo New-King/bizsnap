@@ -21,6 +21,13 @@ final class CalendarService {
 
     private let store = EKEventStore()
 
+    /// 本应用写进系统日历的事件，清空时按 identifier 删
+    private static let createdKey = "createdEventIdentifiers"
+
+    private var createdIdentifiers: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.createdKey) ?? [])
+    }
+
     func requestAccess() async -> Bool {
         do {
             if #available(iOS 17.0, *) {
@@ -69,6 +76,53 @@ final class CalendarService {
         if let notes, !notes.isEmpty { event.notes = notes }
 
         try store.save(event, span: .thisEvent, commit: true)
+        if let id = event.eventIdentifier {
+            var all = createdIdentifiers
+            all.insert(id)
+            UserDefaults.standard.set(Array(all), forKey: Self.createdKey)
+        }
         return start
+    }
+
+    /// 删掉本应用写进日历的事件
+    /// - Parameter titles: 服务端记录的会议标题，用于兜底没记下 identifier 的旧数据
+    @discardableResult
+    func deleteCreated(titles: [String] = []) -> Int {
+        var handled = Set<String>()
+        var removed = 0
+
+        for id in createdIdentifiers {
+            guard let event = store.event(withIdentifier: id) else { continue }
+            do {
+                try store.remove(event, span: .thisEvent, commit: false)
+                handled.insert(id)
+                removed += 1
+            } catch {
+                continue
+            }
+        }
+
+        // 兜底：按标题在前后两年里找，只删标题完全一致的
+        if !titles.isEmpty {
+            let calendar = Calendar.current
+            let start = calendar.date(byAdding: .year, value: -2, to: Date()) ?? Date()
+            let end = calendar.date(byAdding: .year, value: 2, to: Date()) ?? Date()
+            let wanted = Set(titles)
+            let matches = store.events(matching: store.predicateForEvents(withStart: start, end: end, calendars: nil))
+            for event in matches where wanted.contains(event.title) {
+                guard let id = event.eventIdentifier, !handled.contains(id) else { continue }
+                do {
+                    try store.remove(event, span: .thisEvent, commit: false)
+                    handled.insert(id)
+                    removed += 1
+                } catch {
+                    continue
+                }
+            }
+        }
+
+        if removed > 0 { try? store.commit() }
+        UserDefaults.standard.removeObject(forKey: Self.createdKey)
+        return removed
     }
 }

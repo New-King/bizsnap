@@ -8,8 +8,7 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "check:embedding": "tsx ../scripts/check-embedding.ts",
-    "check:vision": "tsx ../scripts/check-vision.ts",
-    "seed": "tsx ../scripts/seed-demo.ts"
+    "check:vision": "tsx ../scripts/check-vision.ts"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^3.0.75",

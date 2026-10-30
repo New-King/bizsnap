@@ -72,6 +72,12 @@ struct RootView: View {
             }
         }
         .task { await bootstrap() }
+        .onChange(of: client.dataVersion) { _, _ in
+            // 服务端数据已清空：当前会话也要丢掉，否则界面上还挂着旧消息
+            current = .draft()
+            activeId = nil
+            Task { await reloadThreads() }
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
                 .presentationDetents([.medium, .large])

@@ -85,41 +85,17 @@ struct SettingsView: View {
     private var actionCard: some View {
         VStack(spacing: 0) {
             actionRow(
-                title: "填入演示联系人",
-                detail: "往本机通讯录写 8 个人，覆盖换公司、换职位的场景"
-            ) {
-                do {
-                    let count = try await DemoSeed.fillDeviceContacts()
-                    show("已写入 \(count) 位联系人", isError: false)
-                } catch {
-                    show(error.localizedDescription, isError: true)
-                }
-            }
-
-            Divider().overlay(Theme.stroke.opacity(0.06))
-
-            actionRow(
-                title: "灌入服务端演示数据",
-                detail: "3 位联系人与历史事件，用于跨会话找回"
-            ) {
-                do {
-                    let result = try await client.seedServerData()
-                    show("新建 \(result.contacts) 位联系人、\(result.interactions) 条事件", isError: false)
-                } catch {
-                    show(error.localizedDescription, isError: true)
-                }
-            }
-
-            Divider().overlay(Theme.stroke.opacity(0.06))
-
-            actionRow(
-                title: "清空服务端数据",
-                detail: "联系人、事件与会话全部删除，不可恢复",
+                title: "清空全部数据",
+                detail: "服务端联系人、事件与会话，连同本应用写入系统通讯录、日历的内容一起删除",
                 destructive: true
             ) {
                 do {
-                    try await client.resetServerData()
-                    show("已清空", isError: false)
+                    // 服务端先清，并把名单带回来，系统侧照着删
+                    let summary = try await client.resetServerData()
+                    let contacts = (try? ContactsService.shared.deleteCreated(names: summary.createdNames)) ?? 0
+                    let events = CalendarService.shared.deleteCreated(titles: summary.meetingTitles)
+                    SystemWriteLog.clear()
+                    show("已清空：联系人 \(contacts) 位、会议 \(events) 场", isError: false)
                 } catch {
                     show(error.localizedDescription, isError: true)
                 }

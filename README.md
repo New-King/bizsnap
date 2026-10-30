@@ -20,10 +20,10 @@ bizsnap/
 ├── BizSnap/         iOS 工程（XcodeGen 生成）
 │   └── BizSnap/
 │       ├── Models/  DTO、行动卡片、消息
-│       ├── Services/ 接口调用、通讯录、日历、卡片执行、演示数据
+│       ├── Services/ 接口调用、通讯录、日历、卡片执行
 │       ├── Features/ 会话列表、会话详情、设置
 │       └── Theme/
-└── scripts/         环境自检、演示数据（纯 fetch，不依赖 server 的依赖）
+└── scripts/         两个外部依赖的自检（纯 fetch，不依赖 server 的依赖）
 ```
 
 ## 运行
@@ -45,9 +45,6 @@ pnpm dev          # :8787
 # 可选：自检两个外部依赖
 pnpm check:embedding    # 断言 bge-large-zh-v1.5 返回 1024 维
 pnpm check:vision       # 现场画一张 PNG 发给 deepseek-flash，验证图片输入
-
-# 可选：灌服务端演示数据（也可以从 App 设置页点一次）
-pnpm seed
 ```
 
 脚本都在仓库根的 `scripts/`，通过 `server/package.json` 里的 npm script 调用（`tsx ../scripts/xxx.ts`），所以只用 Node 内置模块与全局 `fetch`，不需要额外装包。
@@ -59,7 +56,7 @@ cd BizSnap && xcodegen generate
 open BizSnap.xcodeproj
 ```
 
-首次在模拟器上跑，通讯录是空的，去设置页点一次「填入演示联系人」；同一页还能改服务地址、灌服务端演示数据、清空数据。
+从空库开始跑：设置页只有服务地址与「清空全部数据」（服务端库、本应用写进系统通讯录的联系人、写进日历的会议一起清）。
 
 服务地址默认 `http://127.0.0.1:8787`，`Info.plist` 里已放行本地网络的明文 HTTP。
 

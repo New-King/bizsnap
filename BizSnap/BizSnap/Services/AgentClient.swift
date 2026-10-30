@@ -16,6 +16,8 @@ final class AgentClient: ObservableObject {
 
     @Published private(set) var baseURL: URL
     @Published private(set) var online = false
+    /// 清空数据后自增：界面靠它把会话列表和当前会话一起重置
+    @Published private(set) var dataVersion = 0
 
     private let session: URLSession
     private let decoder = JSONDecoder()
@@ -197,15 +199,15 @@ final class AgentClient: ObservableObject {
         }
     }
 
-    // MARK: - 演示数据
+    // MARK: - 清空数据
 
+    /// 清空服务端，并返回被清掉的联系人姓名 / 会议标题（用于同步清理系统通讯录与日历）
     @discardableResult
-    func seedServerData() async throws -> SeedResult {
-        try decoder.decode(SeedResult.self, from: await perform("/api/demo/seed", method: "POST"))
-    }
-
-    func resetServerData() async throws {
-        _ = try await perform("/api/demo/reset", method: "POST")
+    func resetServerData() async throws -> ResetResult {
+        let result = try decoder.decode(ResetResult.self, from: await perform("/api/demo/reset", method: "POST"))
+        // 服务端已经没有这些会话了，客户端也得丢掉当前会话与列表
+        dataVersion += 1
+        return result
     }
 }
 

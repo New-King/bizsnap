@@ -20,7 +20,8 @@ export const config = {
   port: Number(process.env.PORT ?? 8787),
   // 默认只听回环：模拟器够用，也不至于把没有鉴权的接口暴露到局域网。
   // 真机调试时用 HOST=0.0.0.0 启动，手机连 Mac 的局域网 IP。
-  host: process.env.HOST ?? '127.0.0.1',
+  // 真机要通过 Mac 的局域网地址连进来，默认就得监听所有网卡
+  host: process.env.HOST ?? '0.0.0.0',
 
   deepseekApiKey: required('DEEPSEEK_API_KEY', '在 server/.env 里填 DEEPSEEK_API_KEY'),
   siliconflowApiKey: required('SILICONFLOW_API_KEY', '在 server/.env 里填 SILICONFLOW_API_KEY（嵌入必选）'),

@@ -56,7 +56,10 @@ struct WrittenCard: Codable, Hashable {
     let error: String?
 }
 
-struct SeedResult: Codable {
-    let contacts: Int
-    let interactions: Int
+/// 清空服务端后返回的名单：客户端拿它把写进系统通讯录 / 日历的条目也删掉
+struct ResetResult: Codable {
+    let createdNames: [String]
+    let meetingTitles: [String]
+
+    static let empty = ResetResult(createdNames: [], meetingTitles: [])
 }

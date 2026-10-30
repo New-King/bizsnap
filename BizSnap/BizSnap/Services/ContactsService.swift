@@ -8,6 +8,13 @@ final class ContactsService {
 
     private let store = CNContactStore()
 
+    /// 只记本应用**新建**的联系人；被更新过的原有联系人不会记进来，清空时不会误删
+    private static let createdKey = "createdContactIdentifiers"
+
+    private var createdIdentifiers: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.createdKey) ?? [])
+    }
+
     private let keys: [CNKeyDescriptor] = [
         CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
         CNContactOrganizationNameKey as CNKeyDescriptor,
@@ -86,7 +93,53 @@ final class ContactsService {
         if let position, !position.isEmpty { contact.jobTitle = position }
         save.add(contact, toContainerWithIdentifier: nil)
         try store.execute(save)
+        remember(contact.identifier)
         return "已写入通讯录：\(name)"
+    }
+
+    /// 删掉本应用新建的联系人（用户原有的、只是被更新过的不动）
+    /// - Parameter names: 服务端记录的「创建过的人」，用于兜底没记下 identifier 的旧数据
+    @discardableResult
+    func deleteCreated(names: [String] = []) throws -> Int {
+        guard status == .authorized else { throw SystemAccessError.contactsDenied }
+
+        let keys: [CNKeyDescriptor] = [CNContactFormatter.descriptorForRequiredKeys(for: .fullName)]
+        let save = CNSaveRequest()
+        var handled = Set<String>()
+        var removed = 0
+
+        for id in createdIdentifiers {
+            guard let contact = try? store.unifiedContact(withIdentifier: id, keysToFetch: keys),
+                  let mutable = contact.mutableCopy() as? CNMutableContact else { continue }
+            handled.insert(contact.identifier)
+            save.delete(mutable)
+            removed += 1
+        }
+
+        // 兜底：旧版本没记 identifier，按名字精确匹配删（只删服务端标为「创建」的人）
+        for name in names where !name.isEmpty {
+            let predicate = CNContact.predicateForContacts(matchingName: name)
+            guard let matches = try? store.unifiedContacts(matching: predicate, keysToFetch: keys) else { continue }
+            for contact in matches {
+                guard !handled.contains(contact.identifier),
+                      (CNContactFormatter.string(from: contact, style: .fullName) ?? "") == name,
+                      let mutable = contact.mutableCopy() as? CNMutableContact else { continue }
+                handled.insert(contact.identifier)
+                save.delete(mutable)
+                removed += 1
+            }
+        }
+
+        if removed > 0 { try store.execute(save) }
+        // 删成功才把记录清掉，失败还能再点一次
+        UserDefaults.standard.removeObject(forKey: Self.createdKey)
+        return removed
+    }
+
+    private func remember(_ identifier: String) {
+        var all = createdIdentifiers
+        all.insert(identifier)
+        UserDefaults.standard.set(Array(all), forKey: Self.createdKey)
     }
 
     private func find(name: String) throws -> CNContact? {
