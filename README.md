@@ -45,6 +45,9 @@ pnpm dev          # :8787
 # 可选：自检两个外部依赖
 pnpm check:embedding    # 断言 bge-large-zh-v1.5 返回 1024 维
 pnpm check:vision       # 现场画一张 PNG 发给 deepseek-flash，验证图片输入
+
+# 可选：改过嵌入口径（向量文本的拼法）后重算全库
+pnpm reindex            # 逐人重写检索列与向量
 ```
 
 脚本都在仓库根的 `scripts/`，通过 `server/package.json` 里的 npm script 调用（`tsx ../scripts/xxx.ts`），所以只用 Node 内置模块与全局 `fetch`，不需要额外装包。
