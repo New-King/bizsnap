@@ -15,6 +15,7 @@ import {
 import { notFound, parse, readJson } from '../http.js';
 import { bizAgent } from '../mastra/agent.js';
 import { buildPrompt } from '../mastra/prompt.js';
+import { generateTitle } from '../mastra/title.js';
 import { sseResponse } from '../sse.js';
 import type { CardDraft } from '../types.js';
 
@@ -72,9 +73,6 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
 
   const userMessageId = newId();
   await insertMessage(threadId, { id: userMessageId, role: 'user', text, imageBase64 });
-  if (!thread.title && text) {
-    await updateThread(threadId, { title: text.slice(0, 16) });
-  }
 
   const content: (
     | { type: 'text'; text: string }
@@ -156,15 +154,13 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
       cards: cards.length ? cards : undefined,
     });
 
-    // 纯截图进来的会话没有文字标题，用卡片上的人补一个
-    if (!thread.title) {
-      const owner = cards.find((card) => card.kind !== 'create_meeting')?.payload as
-        | { name?: string; targetName?: string }
-        | undefined;
-      const name = owner?.name ?? owner?.targetName ?? '';
-      if (name) await updateThread(threadId, { title: name });
+    // 首轮结束后用模型起一个短标题；失败不影响这一轮
+    let finalTitle = thread.title;
+    if (!finalTitle.trim()) {
+      finalTitle = await generateTitle(text, replyText).catch(() => '');
+      if (finalTitle) await updateThread(threadId, { title: finalTitle });
     }
 
-    send({ type: 'done', message });
+    send({ type: 'done', message, title: finalTitle || undefined });
   });
 });

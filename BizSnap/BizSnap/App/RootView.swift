@@ -22,6 +22,10 @@ struct RootView: View {
                     onThreadCreated: { id in
                         activeId = id
                         Task { await reloadThreads() }
+                    },
+                    onTitleChanged: { newTitle in
+                        current.title = newTitle
+                        Task { await reloadThreads() }
                     }
                 )
                 .id(current.id)

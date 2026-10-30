@@ -9,6 +9,8 @@ struct ChatView: View {
     var onOpenDrawer: () -> Void
     /// 草稿落库后把真实会话 ID 回传给上层
     var onThreadCreated: (String) -> Void
+    /// 首轮结束后服务端生成了标题
+    var onTitleChanged: (String) -> Void
 
     @EnvironmentObject private var client: AgentClient
 
@@ -43,11 +45,13 @@ struct ChatView: View {
     init(
         thread: ThreadSummary,
         onOpenDrawer: @escaping () -> Void = {},
-        onThreadCreated: @escaping (String) -> Void = { _ in }
+        onThreadCreated: @escaping (String) -> Void = { _ in },
+        onTitleChanged: @escaping (String) -> Void = { _ in }
     ) {
         self.thread = thread
         self.onOpenDrawer = onOpenDrawer
         self.onThreadCreated = onThreadCreated
+        self.onTitleChanged = onTitleChanged
         _threadId = State(initialValue: thread.isDraft ? "" : thread.id)
     }
 
@@ -394,7 +398,8 @@ struct ChatView: View {
     // MARK: - 请求
 
     private func load() async {
-        title = thread.contactName.isEmpty ? thread.title : thread.contactName
+        // 顶栏显示会话标题（首轮由服务端生成），没有才退回联系人名
+        title = thread.title.isEmpty ? thread.contactName : thread.title
         // 草稿还没有服务端会话，没有历史可拉
         if !threadId.isEmpty {
             do {
@@ -468,8 +473,12 @@ struct ChatView: View {
                     streamingText += delta
                 case .card(let card):
                     streamingCards.append(card)
-                case .done(let message, _, _):
+                case .done(let message, _, _, let newTitle):
                     if let message { messages.append(message) }
+                    if let newTitle, !newTitle.isEmpty {
+                        title = newTitle
+                        onTitleChanged(newTitle)
+                    }
                     // 同一轮更新里清空，避免正式消息和流式气泡同时出现
                     streamingText = ""
                     streamingCards = []
@@ -530,27 +539,25 @@ struct ChatView: View {
         do {
             try await client.confirmStreaming(threadId: threadId, cards: cards) { event in
                 switch event {
-                case .written(let written, let contactName):
+                case .written(let written, _):
                     // 事务已提交：先把卡片折叠掉，再去写系统通讯录 / 日历
                     let okIds = Set(written.filter(\.ok).map(\.cardId))
                     markConfirmed(okIds)
                     for item in written where !item.ok {
                         localErrors[item.cardId] = item.error ?? "写入失败"
                     }
-                    if !contactName.isEmpty { title = contactName }
                     let targets = cards.filter { okIds.contains($0.id) }
                     Task { await writeToSystem(targets) }
 
                 case .text(let delta):
                     streamingText += delta
 
-                case .done(_, let insight, let contactName):
+                case .done(_, let insight, _, _):
                     let final = (insight?.isEmpty == false ? insight! : streamingText)
                     if !final.isEmpty {
                         messages.append(.localAssistant(text: final))
                     }
                     streamingText = ""
-                    if !contactName.isEmpty { title = contactName }
 
                 case .failed(let message):
                     errorText = message

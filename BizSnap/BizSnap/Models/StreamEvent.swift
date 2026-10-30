@@ -6,7 +6,7 @@ enum StreamEvent {
     case text(String)
     case card(ActionCard)
     case written([WrittenCard], contactName: String)
-    case done(message: ChatMessage?, insight: String?, contactName: String)
+    case done(message: ChatMessage?, insight: String?, contactName: String, title: String?)
     case failed(String)
 }
 
@@ -21,6 +21,8 @@ struct RawStreamEvent: Decodable {
     let insight: String?
     let error: String?
     let messageId: String?
+    /// 首轮结束后服务端生成的会话标题
+    let title: String?
 
     func toEvent() -> StreamEvent? {
         switch type {
@@ -34,7 +36,12 @@ struct RawStreamEvent: Decodable {
         case "written":
             return .written(written ?? [], contactName: contactName ?? "")
         case "done":
-            return .done(message: message, insight: insight, contactName: contactName ?? "")
+            return .done(
+                message: message,
+                insight: insight,
+                contactName: contactName ?? "",
+                title: title
+            )
         case "error":
             return .failed(error ?? "服务端错误")
         default:

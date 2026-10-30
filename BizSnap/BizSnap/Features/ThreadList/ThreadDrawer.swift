@@ -141,25 +141,17 @@ struct ThreadDrawer: View {
         } label: {
             HStack(spacing: 10) {
                 ZStack {
-                    Circle().fill(Theme.accent.opacity(0.14))
-                    Text(thread.avatarText)
-                        .font(.system(size: 13, weight: .semibold))
+                    Circle().fill(Theme.accent.opacity(0.12))
+                    Image(systemName: "bubble.left")
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.accentSoft)
                 }
                 .frame(width: 30, height: 30)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(thread.displayTitle)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                    if !thread.lastMessage.isEmpty {
-                        Text(thread.lastMessage)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textTertiary)
-                            .lineLimit(1)
-                    }
-                }
+                Text(thread.displayTitle)
+                    .font(.system(size: 15))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
 
                 Spacer(minLength: 6)
             }
