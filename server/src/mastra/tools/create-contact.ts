@@ -6,7 +6,7 @@ import type { CardDraft, CreateContactPayload } from '../../types.js';
 export const createContact = createTool({
   id: 'create_contact',
   description:
-    '生成一张「创建联系人」卡片草案。不写库：只有用户确认后才会真正落库并写入系统通讯录。出卡前必须先在正文里说清建谁、什么公司、什么职位。',
+    '整理一条创建联系人的记录：姓名必填，其余字段能确定就填。这里不写库，不会立刻生效。',
   inputSchema: z.object({
     name: z.string().min(1).describe('姓名，必填'),
     phone: z.string().optional().describe('手机号或座机'),
@@ -32,12 +32,12 @@ export const createContact = createTool({
       if (value) payload[key] = value;
     }
 
-    const card: CardDraft = {
+    const draft: CardDraft = {
       id: newId(),
       kind: 'create_contact',
       reason: input.reason?.trim() || undefined,
       payload,
     };
-    return { card };
+    return { draft };
   },
 });

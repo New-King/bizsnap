@@ -17,6 +17,13 @@ struct ThreadSummary: Codable, Identifiable, Hashable {
     var avatarText: String {
         String(displayTitle.prefix(1))
     }
+
+    /// 还没落库的新会话：本地占位，用户发出第一条消息时才向服务端创建
+    var isDraft: Bool { id.hasPrefix("draft-") }
+
+    static func draft() -> ThreadSummary {
+        ThreadSummary(id: "draft-\(UUID().uuidString)", title: "", contactName: "", lastMessage: "", updatedAt: "")
+    }
 }
 
 /// 首次进入或通讯录变更后上传，最多 200 条

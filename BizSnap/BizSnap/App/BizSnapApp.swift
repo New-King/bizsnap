@@ -6,7 +6,7 @@ struct BizSnapApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ThreadListView()
+            RootView()
                 .environmentObject(client)
                 .tint(Theme.accent)
         }

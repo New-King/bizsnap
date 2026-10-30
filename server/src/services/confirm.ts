@@ -182,7 +182,7 @@ export async function confirmCards(
           interaction: null,
           contactName: '',
           background,
-          error: '卡片缺少姓名',
+          error: '缺少姓名',
         });
         continue;
       }

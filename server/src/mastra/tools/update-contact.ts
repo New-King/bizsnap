@@ -15,7 +15,7 @@ const FIELD_TO_ATTR: Record<string, AttributeType> = {
 export const updateContact = createTool({
   id: 'update_contact',
   description:
-    '生成一张「更新联系人」卡片草案，只写这次要改的字段。目标必须已经存在于库里（先用 search_contact 或 get_contact_history 确认）。不写库：用户确认后才生效。',
+    '整理一条更新联系人的记录，只写这次要改的字段。目标必须已经存在于库里（先用 search_contact 或 get_contact_history 确认）。这里不写库，不会立刻生效。',
   inputSchema: z.object({
     target_name: z.string().min(1).describe('要改的人，需与库里姓名一致'),
     phone: z.string().optional(),
@@ -47,17 +47,17 @@ export const updateContact = createTool({
 
     if (!Object.keys(changes).length) {
       return {
-        error: `「${contact.name}」的这些值没有变化，不需要出卡。若信息确实不同，请核对后重试。`,
+        error: `「${contact.name}」的这些值没有变化，不用更新。若信息确实不同，请核对后重试。`,
       };
     }
 
     const payload: UpdateContactPayload = { targetName: contact.name, changes };
-    const card: CardDraft = {
+    const draft: CardDraft = {
       id: newId(),
       kind: 'update_contact',
       reason: input.reason?.trim() || undefined,
       payload,
     };
-    return { card, current: { company: currentValue(contact, 'company'), position: currentValue(contact, 'position') } };
+    return { draft, current: { company: currentValue(contact, 'company'), position: currentValue(contact, 'position') } };
   },
 });

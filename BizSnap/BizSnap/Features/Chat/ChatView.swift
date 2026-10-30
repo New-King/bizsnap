@@ -5,8 +5,15 @@ import SwiftUI
 struct ChatView: View {
     let thread: ThreadSummary
 
+    /// 打开左侧抽屉
+    var onOpenDrawer: () -> Void
+    /// 草稿落库后把真实会话 ID 回传给上层
+    var onThreadCreated: (String) -> Void
+
     @EnvironmentObject private var client: AgentClient
-    @Environment(\.dismiss) private var dismiss
+
+    /// 服务端会话 ID。草稿态为空，发出第一条消息时才创建，避免空会话堆在列表里
+    @State private var threadId: String
 
     @State private var messages: [ChatMessage] = []
     @State private var selected: Set<String> = []
@@ -33,6 +40,17 @@ struct ChatView: View {
     @State private var showContactsPrimer = false
     @State private var showCalendarPrimer = false
 
+    init(
+        thread: ThreadSummary,
+        onOpenDrawer: @escaping () -> Void = {},
+        onThreadCreated: @escaping (String) -> Void = { _ in }
+    ) {
+        self.thread = thread
+        self.onOpenDrawer = onOpenDrawer
+        self.onThreadCreated = onThreadCreated
+        _threadId = State(initialValue: thread.isDraft ? "" : thread.id)
+    }
+
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
@@ -43,6 +61,10 @@ struct ChatView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 12) {
+                            if messages.isEmpty && !sending {
+                                emptyHint
+                            }
+
                             ForEach(messages) { message in
                                 messageView(message)
                                     .id(message.id)
@@ -93,7 +115,6 @@ struct ChatView: View {
                 )
             }
         }
-        .navigationBarBackButtonHidden(true)
         .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
@@ -150,7 +171,10 @@ struct ChatView: View {
                 let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !name.isEmpty else { return }
                 title = name
-                Task { try? await client.renameThread(thread.id, title: name) }
+                Task {
+                    guard !threadId.isEmpty else { return }
+                    try? await client.renameThread(threadId, title: name)
+                }
             }
         }
         .task { await load() }
@@ -161,15 +185,15 @@ struct ChatView: View {
     private var navigationBar: some View {
         HStack(spacing: 12) {
             Button {
-                dismiss()
+                onOpenDrawer()
             } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: "line.3.horizontal")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .frame(width: 36, height: 36)
-                    .background(Circle().fill(Theme.elevated.opacity(0.8)))
+                    .contentShape(Rectangle())
             }
-            .accessibilityLabel("返回")
+            .accessibilityLabel("对话列表")
 
             VStack(alignment: .leading, spacing: 1) {
                 Button {
@@ -227,6 +251,21 @@ struct ChatView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: message.isUser ? .trailing : .leading)
+    }
+
+    /// 空会话时给一句轻提示，免得整页空得像坏了
+    private var emptyHint: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "text.bubble")
+                .font(.system(size: 24, weight: .light))
+                .foregroundStyle(Theme.accentSoft.opacity(0.85))
+            Text("把一段商务对话，\n变成通讯录里的一条记录")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 110)
     }
 
     private var skeleton: some View {
@@ -356,17 +395,27 @@ struct ChatView: View {
 
     private func load() async {
         title = thread.contactName.isEmpty ? thread.title : thread.contactName
-        do {
-            messages = try await client.messages(threadId: thread.id)
-            if let owner = messages.last(where: { $0.hasCards })?.cards?.first?.contactName, !owner.isEmpty, title.isEmpty {
-                title = owner
+        // 草稿还没有服务端会话，没有历史可拉
+        if !threadId.isEmpty {
+            do {
+                messages = try await client.messages(threadId: threadId)
+                if let owner = messages.last(where: { $0.hasCards })?.cards?.first?.contactName, !owner.isEmpty, title.isEmpty {
+                    title = owner
+                }
+                errorText = nil
+            } catch {
+                errorText = error.localizedDescription
             }
-            errorText = nil
-        } catch {
-            errorText = error.localizedDescription
         }
         await prepareContacts()
         await client.checkHealth()
+    }
+
+    /// 草稿在第一条消息时落库，之后一直复用这个 ID
+    private func ensureThread() async throws {
+        guard threadId.isEmpty else { return }
+        threadId = try await client.createThread()
+        onThreadCreated(threadId)
     }
 
     private func prepareContacts() async {
@@ -407,8 +456,9 @@ struct ChatView: View {
         var streamFailed = false
 
         do {
+            try await ensureThread()
             try await client.sendStreaming(
-                threadId: thread.id,
+                threadId: threadId,
                 text: content,
                 imageBase64: imageBase64,
                 snapshot: snapshot
@@ -449,8 +499,9 @@ struct ChatView: View {
     }
 
     private func reloadMessages() async {
+        guard !threadId.isEmpty else { return }
         do {
-            messages = try await client.messages(threadId: thread.id)
+            messages = try await client.messages(threadId: threadId)
             errorText = nil
         } catch {
             errorText = error.localizedDescription
@@ -477,7 +528,7 @@ struct ChatView: View {
         errorText = nil
 
         do {
-            try await client.confirmStreaming(threadId: thread.id, cards: cards) { event in
+            try await client.confirmStreaming(threadId: threadId, cards: cards) { event in
                 switch event {
                 case .written(let written, let contactName):
                     // 事务已提交：先把卡片折叠掉，再去写系统通讯录 / 日历

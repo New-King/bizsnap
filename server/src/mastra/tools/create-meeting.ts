@@ -26,7 +26,7 @@ function plusMinutes(iso: string, minutes: number): string {
 export const createMeeting = createTool({
   id: 'create_meeting',
   description:
-    '生成一张「创建会议」卡片草案。不写库：用户确认后才会写入系统日历。start_time / end_time 必须是带时区偏移的 ISO 8601。',
+    '整理一条会议安排：标题、开始时间、参会人。start_time / end_time 必须是带时区偏移的 ISO 8601。这里不写库，不会立刻生效。',
   inputSchema: z.object({
     title: z.string().min(1).describe('会议标题，如 与王建国确认二期方案'),
     start_time: z.string().describe('开始时间，ISO 8601 带偏移，如 2026-11-04T15:00:00+08:00'),
@@ -61,12 +61,12 @@ export const createMeeting = createTool({
       remark: input.remark?.trim() || undefined,
     };
 
-    const card: CardDraft = {
+    const draft: CardDraft = {
       id: newId(),
       kind: 'create_meeting',
       reason: input.reason?.trim() || undefined,
       payload,
     };
-    return { card };
+    return { draft };
   },
 });

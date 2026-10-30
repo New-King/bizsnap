@@ -125,12 +125,12 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
           continue;
         }
 
-        // 卡片不等整段文字结束：工具一返回就推给前端
+        // 草案不等整段文字结束：工具一返回就推给前端
         if (chunk.type === 'tool-result') {
-          const payload = chunk.payload as { toolName?: string; result?: { card?: CardDraft } };
-          if (payload.toolName && DRAFT_TOOLS.has(payload.toolName) && payload.result?.card) {
-            cards.push(payload.result.card);
-            send({ type: 'card', card: payload.result.card });
+          const payload = chunk.payload as { toolName?: string; result?: { draft?: CardDraft } };
+          if (payload.toolName && DRAFT_TOOLS.has(payload.toolName) && payload.result?.draft) {
+            cards.push(payload.result.draft);
+            send({ type: 'card', card: payload.result.draft });
           }
         }
       }
@@ -147,7 +147,7 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
     }
 
     const replyText =
-      reply.trim() || (cards.length ? '已生成卡片，请确认。' : '没有识别到可记录的信息。');
+      reply.trim() || (cards.length ? '整理好了，看一眼对不对。' : '没有识别到可记录的信息。');
 
     const message = await insertMessage(threadId, {
       id: assistantId,

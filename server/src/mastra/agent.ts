@@ -15,7 +15,7 @@ import { updateContact } from './tools/update-contact.js';
 export const bizAgent = new Agent({
   id: 'bizsnap',
   name: 'bizsnap',
-  description: '商务 CRM 助手：读截图或文字，查人、查历史，出确认卡片',
+  description: '商务助理：读截图或文字，查人、查历史，整理待确认的记录',
   instructions: buildPrompt(),
   // ai@7 的 provider 类型与 Mastra 内部的 V4 结构类型字面不完全一致，运行时一致
   model: chatModel as unknown as MastraLanguageModel,
