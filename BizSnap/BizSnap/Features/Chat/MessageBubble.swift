@@ -15,7 +15,7 @@ struct MessageBubble: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(Theme.stroke.opacity(0.08), lineWidth: 1)
                     )
                     .onTapGesture { onTapImage(picked) }
                     .accessibilityLabel("聊天截图")
@@ -50,7 +50,7 @@ struct MessageBubble: View {
             EmptyView()
         } else {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                .stroke(Theme.stroke.opacity(0.07), lineWidth: 1)
         }
     }
 }

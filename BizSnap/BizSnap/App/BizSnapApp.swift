@@ -8,7 +8,6 @@ struct BizSnapApp: App {
         WindowGroup {
             ThreadListView()
                 .environmentObject(client)
-                .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }
     }

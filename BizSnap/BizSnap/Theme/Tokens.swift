@@ -1,22 +1,26 @@
 import SwiftUI
+import UIKit
 
 enum Theme {
-    // 近黑背景，三层递进
-    static let background = Color(hex: 0x0E0F12)
-    static let surface = Color(hex: 0x16181D)
-    static let elevated = Color(hex: 0x1E2128)
+    // 三层递进，跟随系统浅色/深色
+    static let background = Color.adaptive(light: 0xF4F5F7, dark: 0x0E0F12)
+    static let surface = Color.adaptive(light: 0xFFFFFF, dark: 0x16181D)
+    static let elevated = Color.adaptive(light: 0xFFFFFF, dark: 0x1E2128)
 
     // 单一蓝色强调
-    static let accent = Color(hex: 0x5B8CFF)
-    static let accentSoft = Color(hex: 0x7AA2FF)
+    static let accent = Color.adaptive(light: 0x3D6EF0, dark: 0x5B8CFF)
+    static let accentSoft = Color.adaptive(light: 0x5B8CFF, dark: 0x7AA2FF)
 
-    static let textPrimary = Color(hex: 0xF2F3F5)
-    static let textSecondary = Color(hex: 0xA0A6B0)
-    static let textTertiary = Color(hex: 0x6B7280)
+    static let textPrimary = Color.adaptive(light: 0x111318, dark: 0xF2F3F5)
+    static let textSecondary = Color.adaptive(light: 0x565E6C, dark: 0xA0A6B0)
+    static let textTertiary = Color.adaptive(light: 0x8A91A0, dark: 0x6B7280)
 
-    static let green = Color(hex: 0x34C759)
-    static let orange = Color(hex: 0xFF9F0A)
-    static let red = Color(hex: 0xFF453A)
+    static let green = Color.adaptive(light: 0x1FA84E, dark: 0x34C759)
+    static let orange = Color.adaptive(light: 0xE08600, dark: 0xFF9F0A)
+    static let red = Color.adaptive(light: 0xE03127, dark: 0xFF453A)
+
+    /// 1px 描边与分隔线：浅色下用黑、深色下用白，调用处再叠加透明度
+    static let stroke = Color.adaptive(light: 0x000000, dark: 0xFFFFFF)
 
     static let radius: CGFloat = 16
     static let gap: CGFloat = 8
@@ -38,6 +42,24 @@ extension Color {
             opacity: 1
         )
     }
+
+    /// 同一语义色给两套取值，由系统外观决定用哪套
+    static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)
+        })
+    }
+}
+
+private extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
+        )
+    }
 }
 
 extension View {
@@ -51,7 +73,7 @@ extension View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .stroke(active ? Theme.accent.opacity(0.9) : Color.white.opacity(0.08), lineWidth: active ? 1.2 : 1)
+                    .stroke(active ? Theme.accent.opacity(0.9) : Theme.stroke.opacity(0.08), lineWidth: active ? 1.2 : 1)
             )
     }
 }

@@ -202,7 +202,7 @@ struct ChatView: View {
         .padding(.vertical, 10)
         .background(Theme.background.opacity(0.92))
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.white.opacity(0.05)).frame(height: 0.5)
+            Rectangle().fill(Theme.stroke.opacity(0.05)).frame(height: 0.5)
         }
     }
 
@@ -268,7 +268,7 @@ struct ChatView: View {
                     .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.surface))
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                            .stroke(Theme.stroke.opacity(0.07), lineWidth: 1)
                     )
                     .frame(maxWidth: 300, alignment: .leading)
                 }

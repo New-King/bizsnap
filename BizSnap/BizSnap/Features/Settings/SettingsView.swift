@@ -73,6 +73,11 @@ struct SettingsView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textTertiary)
             }
+            // 真机上 127.0.0.1 指向手机自身，必须换成 Mac 的局域网地址
+            Text("模拟器用 http://127.0.0.1:8787；真机填 Mac 的局域网地址，如 http://192.168.1.5:8787")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .glassCard(padding: 16)
     }
@@ -91,7 +96,7 @@ struct SettingsView: View {
                 }
             }
 
-            Divider().overlay(Color.white.opacity(0.06))
+            Divider().overlay(Theme.stroke.opacity(0.06))
 
             actionRow(
                 title: "灌入服务端演示数据",
@@ -105,7 +110,7 @@ struct SettingsView: View {
                 }
             }
 
-            Divider().overlay(Color.white.opacity(0.06))
+            Divider().overlay(Theme.stroke.opacity(0.06))
 
             actionRow(
                 title: "清空服务端数据",

@@ -72,7 +72,7 @@ struct Composer: View {
                             .fill(Theme.surface)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                                    .stroke(Theme.stroke.opacity(0.07), lineWidth: 1)
                             )
                     )
 
@@ -99,7 +99,7 @@ struct Composer: View {
         }
         .background(Theme.background.opacity(0.96))
         .overlay(alignment: .top) {
-            Rectangle().fill(Color.white.opacity(0.05)).frame(height: 0.5)
+            Rectangle().fill(Theme.stroke.opacity(0.05)).frame(height: 0.5)
         }
     }
 }

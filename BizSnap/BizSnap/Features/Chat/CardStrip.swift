@@ -66,7 +66,7 @@ struct CardStrip: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
-                    .stroke(isSelected ? Theme.accent : Color.white.opacity(0.08), lineWidth: isSelected ? 1.4 : 1)
+                    .stroke(isSelected ? Theme.accent : Theme.stroke.opacity(0.08), lineWidth: isSelected ? 1.4 : 1)
             )
             .scaleEffect(isSelected && pulse ? 1.02 : 1)
         }
@@ -110,7 +110,7 @@ struct CardStrip: View {
     private var checkbox: some View {
         ZStack {
             Circle()
-                .stroke(isSelected ? Theme.accent : Color.white.opacity(0.22), lineWidth: 1.5)
+                .stroke(isSelected ? Theme.accent : Theme.stroke.opacity(0.22), lineWidth: 1.5)
                 .frame(width: 22, height: 22)
             if isSelected {
                 Circle()

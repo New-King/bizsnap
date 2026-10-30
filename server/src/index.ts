@@ -14,6 +14,16 @@ import { threadRoutes } from './routes/threads.js';
 const app = new Hono();
 
 app.use('*', cors());
+
+// 每个请求留一行日志：真机连不上时，先看有没有请求打进来
+app.use('/api/*', async (c, next) => {
+  const started = Date.now();
+  await next();
+  console.log(
+    `[bizsnap] ${c.req.method} ${c.req.path} → ${c.res.status} ${Date.now() - started}ms`,
+  );
+});
+
 app.use(
   '/api/*',
   bodyLimit({
@@ -49,8 +59,8 @@ async function main(): Promise<void> {
   // 提前加载 agent，把配置错误暴露在启动阶段
   await import('./mastra/index.js');
 
-  serve({ fetch: app.fetch, port: config.port, hostname: '127.0.0.1' }, () => {
-    console.log(`[bizsnap] 服务已启动 http://127.0.0.1:${config.port}`);
+  serve({ fetch: app.fetch, port: config.port, hostname: config.host }, () => {
+    console.log(`[bizsnap] 服务已启动 http://${config.host}:${config.port}`);
     console.log(`[bizsnap] 数据库 ${config.dbFile}`);
   });
 }

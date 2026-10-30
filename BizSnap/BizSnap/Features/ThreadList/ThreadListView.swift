@@ -19,6 +19,14 @@ struct ThreadListView: View {
 
                 VStack(spacing: 0) {
                     header
+                    // 错误条放在所有状态之上：空列表时点新建失败也能立刻看到原因
+                    if let errorText {
+                        ErrorBar(text: errorText) {
+                            Task { await reload() }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                    }
                     if loading {
                         loadingRows
                     } else if threads.isEmpty {
@@ -76,12 +84,6 @@ struct ThreadListView: View {
     private var list: some View {
         ScrollView {
             LazyVStack(spacing: Theme.gap) {
-                if let errorText {
-                    ErrorBar(text: errorText) {
-                        Task { await reload() }
-                    }
-                    .padding(.bottom, 4)
-                }
                 ForEach(threads) { thread in
                     Button {
                         path.append(thread)
@@ -146,7 +148,7 @@ struct ThreadListView: View {
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [6, 5]))
-                    .foregroundStyle(Color.white.opacity(0.16))
+                    .foregroundStyle(Theme.stroke.opacity(0.16))
             )
             .padding(.horizontal, 24)
 
@@ -315,7 +317,7 @@ private struct ShimmerModifier: ViewModifier {
         content
             .overlay(
                 LinearGradient(
-                    colors: [.clear, Color.white.opacity(0.07), .clear],
+                    colors: [.clear, Theme.stroke.opacity(0.07), .clear],
                     startPoint: .leading,
                     endPoint: .trailing
                 )
