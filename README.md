@@ -4,17 +4,17 @@ iOS 轻量商务 CRM。上传一段商务聊天截图（或直接打一句话）
 
 ## 当前状态
 
-服务端与 iOS 端均已实现，服务端四个验收 Case 已在本机跑通（包含真实 DeepSeek 视觉输入与硅基流动嵌入）。实现规格见 `docs/plan.md`，设计取舍见 `docs/开发方案.md` 与 `docs/记忆设计.md`，演示流程与实测输出见 `docs/演示脚本.md`。
+服务端与 iOS 端均已实现，服务端五个验收 Case 已在本机跑通（包含真实 DeepSeek 视觉输入与硅基流动嵌入）。完整的实现规格、接口与帧协议、iOS 规格、验收步骤都在 `docs/plan.md`。
 
 ## 结构
 
 ```
 bizsnap/
-├── docs/            plan、开发方案、记忆设计、演示脚本
+├── docs/            交付规格（plan.md）
 ├── server/          Hono + Mastra agent（messages / confirm 走 SSE）
 │   └── src/
 │       ├── db/      contacts / interactions / threads / messages
-│       ├── mastra/  agent、prompt、storage、五个工具
+│       ├── mastra/  agent、prompt、storage、六个工具
 │       ├── services/ 时间线、嵌入、确认落库、洞察、演示数据
 │       └── routes/  会话、消息、确认、demo
 ├── BizSnap/         iOS 工程（XcodeGen 生成）
@@ -74,7 +74,7 @@ open BizSnap.xcodeproj
 | `contacts` | 状态。当前值 + 每条属性的变更时间线，外加一条按人向量 |
 | `interactions` | 事件。发生过什么、为什么、见了谁 |
 
-写入只发生在确认之后，五个工具没有任何写操作。
+写入只发生在确认之后，六个工具没有任何写操作。
 
 ## 已知限制
 

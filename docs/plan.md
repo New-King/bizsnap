@@ -1,453 +1,555 @@
-# BizSnap — 实施计划
+# BizSnap — 交付规格
 
-本文是完整交付规格。按本文实现即可，不需要再做产品决策。
+本文是完整交付规格，按本文实现即可。
 
-## 一、目标与交付物
+## 一、项目与交付物
 
-做一个 iOS 轻量商务 CRM：用户上传一张商务聊天截图（可附一段文字），agent 理解其中的联系人、公司、职位、约定，主动查询已有联系人数据与历史记忆，生成用户可确认的行动卡片；用户确认后写入系统通讯录与日历，并**结合刚写入的事实与该联系人的完整历史，生成对用户有帮助的洞察与建议**。
+iOS 轻量商务 CRM。用户发一张商务聊天截图（可附一段文字，也可以只发文字），agent 读出其中的联系人、公司、职位、约定，主动查库里的人和过往事件，生成「创建联系人 / 更新联系人 / 创建会议」卡片；用户勾选确认后写入系统通讯录与日历，把事实沉淀成按人索引、带时间线的长期记忆，并针对这次写入生成一段洞察。
 
 交付三样：
 
 1. iOS App（SwiftUI，可编译可运行）
-2. GitHub 仓库（含服务端与 App）
-3. 可运行的测试环境（本地即可：Node 服务 + iOS 模拟器）
+2. 服务端（Node + Hono + Mastra agent，本地可跑）
+3. 仓库根 README 与本文档
 
-## 二、技术栈
+## 二、运行环境
+
+- Node 20+、pnpm；macOS + Xcode（iOS 17 模拟器）
+- 服务端依赖装在 `server/`，脚本在仓库根 `scripts/`，iOS 工程在 `BizSnap/`
+
+```bash
+cd server && pnpm install
+cp .env.example .env        # 填两个 key
+pnpm dev                    # http://0.0.0.0:8787
+```
+
+环境变量（`server/.env`，由 `config.ts` 用 dotenv 显式加载绝对路径，从任何目录启动都读这一份）：
+
+```
+DEEPSEEK_API_KEY=        # 必填，对话 / 视觉 / 洞察
+SILICONFLOW_API_KEY=     # 必填，嵌入
+PORT=8787                # 可选
+HOST=0.0.0.0             # 可选，真机调试要监听所有网卡
+```
+
+任一 key 缺失：打印中文提示并 `process.exit(1)`。
+
+iOS：
+
+```bash
+cd BizSnap && xcodegen generate
+bash scripts/ios-run.sh      # 或 open BizSnap.xcodeproj 后 ⌘R
+```
+
+## 三、技术栈
 
 | 层 | 选型 |
 | --- | --- |
-| iOS | SwiftUI，iOS 17+，XcodeGen 管工程 |
+| iOS | SwiftUI，iOS 17.0，XcodeGen 生成工程（`project.yml`） |
 | 系统能力 | PhotosUI、Contacts、EventKit |
-| Agent | `mastra@1.31.x`、`@mastra/core@1.72.x`、`@mastra/memory@1.33.x`、`@mastra/libsql@1.24.x` |
-| 模型 | `@ai-sdk/deepseek` + `deepseek-flash`，`ai@7.x` |
-| 嵌入 | 硅基流动 `BAAI/bge-large-zh-v1.5`（1024 维），`@ai-sdk/openai-compatible@2.x` |
-| HTTP | Hono 4 + `@hono/node-server` + zod 4 | 两个会出字的接口走 SSE 流式，见第八节 |
-| 存储 | LibSQL 单文件 `bizsnap.db`（`@mastra/libsql`） |
-| 运行 | Node 20+，pnpm，tsx |
+| Agent | `@mastra/core@^1.72`、`@mastra/memory@^1.33`、`@mastra/libsql@^1.24`、`@mastra/ai-sdk@^1` |
+| 模型 | `@ai-sdk/deepseek@^3` + `deepseek-flash`，`ai@^7` |
+| 嵌入 | 硅基流动 `BAAI/bge-large-zh-v1.5`（1024 维），`@ai-sdk/openai-compatible@^3` |
+| HTTP | Hono 4 + `@hono/node-server` 2 + zod 4 |
+| 存储 | LibSQL 单文件 `server/bizsnap.db`（`@libsql/client`，业务表与 Mastra memory 共用一个连接） |
+| 运行 | `tsx watch`；脚本用 `tsx` 直接跑 |
 
-环境变量（`server/.env`）：
+依赖范围就是上表这几个包。
 
-```
-DEEPSEEK_API_KEY=        # 必填
-SILICONFLOW_API_KEY=     # 必填
-PORT=8787                # 可选，默认 8787
-```
-
-两个 key 缺任意一个，启动时报中文错误并退出。
-
-## 三、目录结构
+## 四、仓库结构
 
 ```
 bizsnap/
 ├── README.md
-├── docs/
-│   ├── plan.md              本文
-│   ├── 开发方案.md
-│   ├── 记忆设计.md
-│   └── 演示脚本.md
+├── docs/plan.md                 本文
 ├── server/
-│   ├── package.json
+│   ├── package.json              scripts: dev / start / typecheck / check:embedding / check:vision / reindex
 │   ├── tsconfig.json
 │   ├── .env.example
 │   └── src/
-│       ├── index.ts         Hono 应用、CORS、body limit 12mb、统一 onError、`serve()` 启动
-│       ├── sse.ts           SSE 帧写法（`data:` 行 + `withSseHeartbeat` 心跳）
-│       ├── http.ts          readJson / zod 校验转 400
-│       ├── config.ts        环境变量校验、时区 Asia/Shanghai、默认会议 60 分钟
-│       ├── types.ts         ContactRecord / Attribute / Interaction / CardDraft / ChatMessage
+│       ├── index.ts              Hono 应用：cors、请求日志、bodyLimit 12MB、/api/health、统一 notFound/onError、启动时 ensureSchema + 预加载 agent + serve()
+│       ├── config.ts             读 .env、校验 key、常量（模型、嵌入、时区、默认会议时长、db 路径）、RESOURCE_ID
+│       ├── llm.ts               createDeepSeek + chatModel
+│       ├── http.ts              readJson / zod 校验转 400 / notFound
+│       ├── sse.ts               sseResponse：单行 `data: <json>` 帧 + withSseHeartbeat 心跳
+│       ├── types.ts             Attribute / ContactRecord / Interaction / CardDraft / ChatMessage / TraceStep 等
 │       ├── db/
-│       │   ├── client.ts    LibSQL 连接单例（业务表与 Mastra memory 共用一个连接）
-│       │   ├── schema.ts    建业务表（幂等）
-│       │   ├── contacts.ts  upsert、appendInteraction、getByContact、searchByKeyword、listAll
-│       │   └── threads.ts   threads / messages / confirmed_cards
+│       │   ├── client.ts        LibSQL 连接单例
+│       │   ├── schema.ts        建业务表（幂等），并保证代码用到的列齐备
+│       │   ├── contacts.ts      upsert、insertInteraction、listInteractions、searchByKeyword、searchInteractionsByKeywords、searchByEmbedding、findContactByName、listAll、newId
+│       │   └── threads.ts       threads / messages / confirmed_cards
 │       ├── mastra/
-│       │   ├── index.ts     Mastra 实例（storage + agent 注册）
-│       │   ├── storage.ts   LibSQLStore + Memory（lastMessages 20）
-│       │   ├── agent.ts     bizAgent 装配
-│       │   ├── prompt.ts    系统提示（含时间基准注入）
+│       │   ├── index.ts         Mastra 实例（agents: { bizsnap }, storage）
+│       │   ├── storage.ts       LibSQLStore（复用业务连接）+ Memory（lastMessages 20）
+│       │   ├── agent.ts         bizAgent 装配
+│       │   ├── prompt.ts        buildPrompt()，注入当前时间
+│       │   ├── title.ts         generateTitle()：首轮结束后补会话标题
 │       │   └── tools/
 │       │       ├── search-contact.ts
+│       │       ├── search-interactions.ts
 │       │       ├── get-history.ts
 │       │       ├── create-contact.ts
 │       │       ├── update-contact.ts
 │       │       └── create-meeting.ts
 │       ├── services/
-│       │   ├── attributes.ts  时间线封口与合并
-│       │   ├── embedding.ts   拼检索文本、调嵌入、算余弦
-│       │   ├── insight.ts     确认后的洞察生成
-│       │   └── confirm.ts     确认编排（事务）
+│       │   ├── attributes.ts   时间线封口与合并、renderTimeline、currentValue(s)
+│       │   ├── embedding.ts    拼检索文本、调嵌入、算余弦、buildSearchColumns
+│       │   ├── confirm.ts      确认编排（单事务、background 校对、系统写入结果）
+│       │   ├── insight.ts      streamInsight / streamFailureNote
+│       │   ├── trace.ts        TraceRecorder：把流事件收成可展示的链路
+│       │   └── demo-seed.ts    resetDemo：清业务数据与会话表，回传需从系统侧删除的名单
 │       └── routes/
 │           ├── threads.ts
 │           ├── messages.ts
-│           └── confirm.ts
+│           ├── confirm.ts
+│           └── demo.ts
 ├── BizSnap/
-│   ├── project.yml
+│   ├── project.yml              iOS 17.0、bundle com.newking.bizsnap、权限文案、ATS 放行本地
+│   ├── BizSnap.xcodeproj        由 XcodeGen 生成
 │   └── BizSnap/
 │       ├── App/BizSnapApp.swift
-│       ├── Models/
-│       │   ├── DTO.swift
-│       │   ├── ActionCard.swift
-│       │   └── ChatMessage.swift
-│       ├── Services/
-│       │   ├── AgentClient.swift     REST + SSE 两条通路
-│       │   ├── SSEParser.swift       按行切 `data:`，解成事件枚举
-│       │   ├── ImageCompressor.swift
-│       │   ├── ContactsService.swift
-│       │   ├── CalendarService.swift
-│       │   └── DemoSeed.swift
-│       ├── Features/
-│       │   ├── ThreadList/ThreadListView.swift
-│       │   └── Chat/
-│       │       ├── ChatView.swift
-│       │       ├── MessageBubble.swift
-│       │       ├── CardStrip.swift
-│       │       └── Composer.swift
+│       ├── App/RootView.swift
+│       ├── Models/{DTO,ActionCard,ChatMessage,StreamEvent,TraceStep}.swift
+│       ├── Services/{AgentClient,SSEParser,ImageCompressor,ContactsService,CalendarService,CardExecutor}.swift
+│       ├── Features/Chat/{ChatView,MessageBubble,CardStrip,Composer,ErrorBar,AgentFeedback,AgentTraceView,CameraPicker}.swift
+│       ├── Features/ThreadList/ThreadDrawer.swift
+│       ├── Features/Settings/SettingsView.swift
 │       └── Theme/Tokens.swift
 └── scripts/
-    ├── check-vision.ts
-    ├── check-embedding.ts
-    └── seed-demo.ts
+    ├── env.ts                   脚本读 server/.env
+    ├── check-embedding.ts       断言嵌入返回 1024 维
+    ├── check-vision.ts          现场画一张 PNG 发给 deepseek-flash，验证图片输入
+    ├── reindex-embeddings.ts    遍历全库重算检索列与向量
+    └── ios-run.sh               编译 → 装进已启动模拟器 → 启动 app
 ```
 
-## 四、数据模型
+## 五、数据模型
 
-### `contacts`（状态）
+业务表由 `db/schema.ts` 幂等创建；Mastra 的 `mastra_*` 表由 LibSQLStore 初始化。同一个 `bizsnap.db` 文件。
+
+### `contacts` —— 状态
 
 ```ts
-export type AttributeType = 'industry' | 'company' | 'position' | 'project' | 'relation';
+type AttributeType = 'industry' | 'company' | 'position' | 'project' | 'relation';
 
-export type Attribute = {
+type Attribute = {
   type: AttributeType;
-  value: string;
-  since: string;          // ISO 日期，当前值生效日
+  value: string;          // 当前值
+  since: string;          // 当前值生效日，YYYY-MM-DD
   history: { from: string; to: string; value: string }[];  // 旧值，区间不重叠，最多 10 段
 };
 
-export type ContactRecord = {
-  id: string;             // 姓名归一化后 sha1 前 16 位
+type ContactRecord = {
+  id: string;             // 归一化姓名 sha1 前 16 位
   name: string;
-  phone: string;
+  phone: string;          // 不建时间线，直接覆盖；变更由 interactions.attrs 留痕
   email: string;
   attributes: Attribute[];
-  searchCurrent: string;  // 派生：name + 各属性当前值，空格分隔
+  searchCurrent: string;  // 派生：姓名 + 5 个当前值，空格分隔
   searchHistory: string;  // 派生：各属性历史值 + 历史 phone/email，空格分隔
-  embedding: string | null; // JSON 数组文本，1024 维
-  lastContactAt: string;
+  embedding: string | null;  // 派生：JSON 数组文本，1024 维，只嵌「现在」
+  lastContactAt: string | null;
   interactionCount: number;
+  createdAt: string;
+  updatedAt: string;
 };
 ```
 
-### `interactions`（事件）
+### `interactions` —— 事件
 
 ```ts
-export type Interaction = {
+type Interaction = {
   id: string;
   contactId: string;
-  groupId: string;         // 同一次确认的多条共享
-  at: string;              // ISO 8601
+  groupId: string;        // 同一次确认产生的多条共享
+  at: string;             // ISO 8601
   kind: 'created' | 'updated' | 'meeting';
   source: 'image' | 'text' | 'both';
-  attrs: string[];         // 本次动了哪些属性名，如 ['company']
-  background: string;      // 为什么；没有依据则为空字符串
-  meeting?: {
-    title: string;
-    startTime: string;     // 带时区偏移的 ISO 8601
-    endTime: string;
-    location: string;
-    participants: string[];
-  };
+  attrs: string[];        // 本次动了哪些属性名，如 ['company']
+  background: string;     // 为什么；没有依据则为空字符串
+  meeting?: { title: string; startTime: string; endTime: string; location: string; participants: string[] };
 };
 ```
+
+会议只存一条记录，挂在**当前会话的主联系人**名下；`participants` 存原数组，展示时 1 人写名字、2 人写「张三、李四」、3 人以上写「张三等 4 人」。
 
 ### 卡片草案
 
 ```ts
-export type CardKind = 'create_contact' | 'update_contact' | 'create_meeting';
+type CardKind = 'create_contact' | 'update_contact' | 'create_meeting';
 
-export type CardDraft = {
-  id: string;
+type CardDraft = {
+  id: string;             // 工具生成，确认时原样带回
   kind: CardKind;
+  reason?: string;        // 模型复述的输入原话，confirm 时校对
   payload:
-    | { name: string; phone?: string; email?: string; industry?: string;
-        company?: string; position?: string; project?: string; relation?: string }
+    | { name: string; phone?: string; email?: string; industry?: string; company?: string; position?: string; project?: string; relation?: string }
     | { targetName: string; changes: Record<string, string> }
-    | { title: string; startTime: string; endTime: string;
-        location?: string; participants: string[]; remark?: string };
+    | { title: string; startTime: string; endTime: string; location?: string; participants: string[]; remark?: string };
 };
 ```
 
-### 消息
+### 会话与消息
 
 ```ts
-export type ChatMessage = {
+type ThreadSummary = { id: string; title: string; contactName: string; lastMessage: string; updatedAt: string };
+
+type TraceStep =
+  | { kind: 'reasoning'; text: string }
+  | { kind: 'tool'; id: string; tool: string; label: string; detail?: string; status: 'running' | 'ok' | 'error' };
+
+type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
   text?: string;
   imageBase64?: string;   // 用户图，仅用于回显
-  cards?: CardDraft[];    // 该条 agent 回复附带的卡片
+  cards?: CardDraft[];    // 该条回复附带的卡片草案
+  trace?: TraceStep[];    // 这一轮的思考与工具链路
   createdAt: string;
 };
 ```
 
-## 五、记忆规则
+表结构：
 
-### 1. 属性时间线
+| 表 | 列 |
+| --- | --- |
+| `threads` | `id` / `title` / `contact_name` / `last_message` / `created_at` / `updated_at` |
+| `messages` | `id` / `thread_id` / `role` / `text` / `image_base64` / `cards`(JSON) / `trace`(JSON) / `created_at`；索引 `(thread_id, created_at)` |
+| `confirmed_cards` | `card_id`(主键) / `thread_id` / `at` |
+| `mastra_*` | 由 Memory 维护，`lastMessages: 20` |
 
-- 某属性有新值 → 旧 `value` 压进 `history`，`to` = 新 `since` 前一天；`value` 替换，`since` = 今天
-- 值没变 → 不动
-- `history` 只增不删；超过 10 段时把最早的几段合并为一段，`value` 形如「此前：房地产销售」
-- `phone` / `email` 不建时间线，直接覆盖；变更记录在 `interactions.attrs` 留痕
+`messages` 是给人看的账（带图、带卡片、带链路，刷新能还原），`mastra_*` 是给模型看的上下文。业务记忆（`contacts` / `interactions`）与两者正交。
 
-### 2. `background`
+## 六、记忆规则
 
-只复述本轮输入里明确出现的原因（截图文字或用户那句话）。找不到依据就写空字符串。
+### 1. 属性时间线（SCD2）
 
-两道关卡：`prompt.ts` 里明确要求；`services/confirm.ts` 里做字符串校对，输入中不含该原因时置空并打 warn。
+- 有新值：旧 `value` 压进 `history`，`to` = 新 `since` 前一天；`value` 换成新值，`since` = 今天
+- 值没变：整条不动
+- `history` 只增不删；超过 10 段时把最早几段合并成一段，`value` 形如「此前：房地产销售」
+- 同一天内改两次：区间收敛成当天有效（`from == to`），展示为「2026-10-30 为 建筑设计」
+- `history` 是 `interactions` 的物化投影，只能由确认接口派生，任何读取路径不许写
+
+### 2. `background` 不许模型编
+
+只复述本轮输入（截图文字 + 用户那句话）里明确出现的原因，没有就空字符串。两道关卡：
+
+- `prompt.ts` 里要求 `reason` 只复述原话
+- `services/confirm.ts` 的 `groundBackground()` 做字符串校对：去标点空白后整段命中 → 通过；否则切成三字片段，命中率 ≥ 50% → 通过；都不满足 → 置空并 `console.warn`
+
+本轮输入取该会话最后一条 user 消息。
 
 ### 3. 写入路径
 
-五个工具一律只读或只返回草案，不碰数据库。写库只发生在 `POST /api/threads/:id/confirm`，一个事务包住：
+六个工具全部只读或只出草案。写库只发生在 `POST /api/threads/:id/confirm`，一个事务包住「多条 interaction + attributes 时间线封口/新值」。任一环节失败整体回滚。
 
-```
-多条 interaction → attributes 封口与新值
-```
+`searchCurrent` / `searchHistory` / `embedding` 是派生物，在**事务提交之后**重算：嵌入要发 HTTP 请求，占着写锁等网络会卡死并发确认；嵌入失败也不该让联系人写不进去（该人暂时不参与语义检索，关键词检索照常）。
 
-任一环节失败整体回滚。`searchCurrent` / `searchHistory` / `embedding` 在事务提交后重算：嵌入要发 HTTP 请求，占着写锁等网络会把并发确认卡死；嵌入失败也只是这个人暂时不参与语义检索。
-
-### 4. 检索
+### 4. 检索：三条路各管一段
 
 `search_contact` 的查找顺序：
 
 1. 姓名 / 电话 / 公司 LIKE `searchCurrent` → `matchedIn: 'now'`
 2. LIKE `searchHistory` → `matchedIn: 'history'`
-3. 前两步命中少于 3 个时，把 query 嵌入，与全表 embedding 算余弦相似度 → `matchedIn: 'semantic'`
+3. 前两步命中少于 3 个时，把 query 嵌入，与全表 embedding 算余弦 → `matchedIn: 'semantic'`
 
-`when: 'now'` 时丢掉只命中 `searchHistory` 的候选。
+`when: 'now'` 时丢掉只命中 `searchHistory` 的候选。候选最多 10 条，带 `now`（当前值）、`timeline`（可读时间线）、`inDevice`（是否已在系统通讯录）。
 
-向量只用于「找到是谁」，命中后所有事实回数据库取。
+向量一人一条，只嵌「姓名 + 5 个当前值」：一条向量只代表一个主题，塞进历史段会摊薄权重；历史段多了还可能超出嵌入输入上限。电话邮箱不进向量，精确查找用 LIKE。
 
-## 六、Agent
+往事由 `search_interactions` 用关键词查 `interactions.background` / `meeting` 原文，不给 `interactions` 建向量。
+
+嵌入模型固定 `BAAI/bge-large-zh-v1.5`（1024 维）。检索文本口径与已存的向量必须一致，全库重算走 `pnpm reindex`。
+
+## 七、Agent
 
 ```ts
-// src/mastra/agent.ts
-const memory = new Memory({
-  storage: new LibSQLStore({ id: 'bizsnap', url: 'file:./bizsnap.db' }),
-  options: { lastMessages: 20 },
-});
-
+// server/src/mastra/agent.ts
 export const bizAgent = new Agent({
+  id: 'bizsnap',
   name: 'bizsnap',
-  instructions: buildPrompt({ now: new Date(), timezone: 'Asia/Shanghai' }),
-  model: deepseek('deepseek-flash'),
-  tools: { searchContact, getContactHistory, createContact, updateContact, createMeeting },
-  memory,
+  description: '商务助理：读截图或文字，查人、查历史，整理待确认的记录',
+  instructions: buildPrompt(),
+  model: chatModel as unknown as MastraLanguageModel,  // ai@7 的 provider 类型与 Mastra 内部 V4 类型字面不一致，运行时一致
+  tools: {
+    search_contact: searchContact,
+    search_interactions: searchInteractions,
+    get_contact_history: getContactHistory,
+    create_contact: createContact,
+    update_contact: updateContact,
+    create_meeting: createMeeting,
+  },
+  memory,   // LibSQLStore + lastMessages: 20
 });
 ```
 
-`agent.generate(messages, { memory: { thread, resource }, stopWhen: stepCountIs(5) })`。
+调用：`bizAgent.stream([{ role: 'user', content }], { instructions: buildPrompt(), memory: { thread, resource: 'owner' }, requestContext, maxSteps: 5 })`。
 
-### 系统提示要点
+- 多步上限用 Mastra 的 `maxSteps`，允许「查人 → 查历史 → 出卡」这类多步推理
+- `Memory` 只承担会话消息持久化与 `lastMessages: 20`；按人索引的记忆由 `contacts` / `interactions` 承载，跨会话找人一律走数据库检索
+- 会话标题（`title.ts`）在首轮 `done` 之后单独生成，失败不影响这一轮
 
-1. **身份**：商务 CRM 助手，只处理商务信息。
-2. **非商务输入**：生活闲聊、表情包、广告、代码截图，直接回复「未识别到商务信息」，不调用工具、不出卡片。
-3. **查人优先**：涉及某个人时先 `search_contact`；需要历史细节时再 `get_contact_history`。查到多人时，用一句话让用户确认是哪一个，不要自己猜。
-4. **必须说清**：卡片只有「创建联系人 / 创建会议 / 更新联系人」这几个字，不显示任何字段。所以每条回复的正文必须写明本次要写入的具体内容：建谁、哪家公司、什么职位、约在哪天几点、哪些人参加。不许只出卡不说话。
-5. **信息不足先问**：缺关键信息（如创建会议没有时间、创建联系人没有姓名）时，在对话里追问，不生成卡片。
-6. **时间**：提示里带 `now`、`weekday`、`timezone`。用户说「下周三下午三点」时换算成带 `+08:00` 偏移的 ISO 8601。不写相对时间。
-7. **background**：写事件原因时只复述输入里出现的话；没有就留空，不推测。
-8. **洞察**：卡片发出前不要长篇分析；洞察在用户确认之后由服务端单独生成。
+### 系统提示（`buildPrompt()`）
 
-## 七、五个工具
+每次请求重建，注入当前时间（`Asia/Shanghai`，含星期）。规则按组给出，全部是硬性的：
 
-| 工具 | inputSchema | 返回 |
+1. **身份**：BizSnap 商务助理；用户发截图、文字或两者；从里面读人和事，必要时查过往。
+2. **能做什么**：创建联系人、更新联系人、创建会议。
+3. **说话方式**：像同事汇报，不提界面 / 按钮 / 确认 / 卡片 / 流程状态；不叙述调用了什么工具、查的是库还是历史；不播报处理过程；事情没真正生效时不说「已保存」，说「整理好了」；交代完就停。
+4. **内容**：只讲商务事实（谁、哪家公司、职位、时间、谁参加）；信息没齐先问（认识一个人至少要有姓名，约会议必须有开始时间，改资料要能对上是谁）；一次输入多件事分条说；截图与文字冲突时以用户写的字为准；出错用一句自然的话说明，不粘贴原始错误。
+5. **落成记录**：这一轮能定下来的必须真的调工具（`create_contact` / `update_contact` / `create_meeting`）；正文里说的每条记录都要有对应工具调用，一次调用只出一条；工具返回 error 时按第 4 组说人话，不改口说「整理好了」；信息不够、正在追问的那一轮不提前建记录。
+6. **只处理商务**：生活闲聊、表情包、广告、代码截图直接回「未识别到商务信息」，不调工具。
+7. **查人优先**：涉及某人先 `search_contact`；需要更细履历再 `get_contact_history`；没找到人或只有模糊描述（「上次做跨境支付那个」）用 `search_interactions`；查到多人用一句话问清是哪一位；问「现在」的情况用 `when="now"`。
+8. **时间**：相对时间换算成带偏移 ISO 8601（如 `2026-11-04T15:00:00+08:00`）；没说结束时间按 1 小时。
+9. **字段连带过期**：换行业/换公司时旧的公司、职位、项目可能失效，先问一句再改；不自己删字段，不在一条消息里连问一串。
+10. **事件原因**：`reason` 只写输入里明确出现的原因，原话片段；没有就留空。
+11. **记忆**：查得到就说，查不到就说没有记录，不编造。
+12. 用中文，简洁具体，不用「我建议您」这类客套。
+
+### 卡片的硬约束
+
+卡片本身只有类型文案 + 勾选框，不显示任何字段。所以正文必须写清本次要写入什么（建谁、改哪项、什么时间、哪些人参加）；信息不够就先追问，不出卡。
+
+## 八、六个工具
+
+注册名（模型看到的 `toolName`）必须与下表一致，服务端靠这些字符串判断草案与链路。
+
+| 工具 | 入参 | 行为 |
 | --- | --- | --- |
-| `search_contact` | `query: string`、`when?: 'now' \| 'any'`（默认 any） | `{ inDevice: boolean, candidates: [{ id, name, now: Record<string,string>, timeline: string, matchedIn }] }`，最多 10 条 |
-| `get_contact_history` | `name: string`、`limit?: number`（默认 8） | `{ name, timeline: string, events: [{ at, kind, attrs, background, meeting? }] }` |
-| `create_contact` | name（必填）/ phone / email / industry / company / position / project / relation / `reason?` | `CardDraft`（kind `create_contact`）；同名已存在时返回 error |
-| `update_contact` | `target_name`（必填）+ 任意字段 + `reason?` | `CardDraft`（kind `update_contact`，`changes` 只含本次要改的字段）；无变化时返回 error |
-| `create_meeting` | title / start_time / end_time / participants（数组）/ location / remark / `reason?` | `CardDraft`（kind `create_meeting`） |
+| `search_contact` | `query: string`、`when?: 'now' \| 'any'`（默认 any） | 三段检索（见第六节），返回 `{ query, when, total, inDevice, candidates: [{ id, name, now, timeline, matchedIn, inDevice }], note }`，最多 10 条；库里没有时 `note` 提示「可能是新联系人」 |
+| `search_interactions` | `keywords: string[]`（2~6 字实词）、`limit?`（默认 8） | 关键词再切 2-gram 补充，在 `background` / `meeting` 子串匹配，命中多的排前，返回事件原文（带 `contactName`）交模型判断 |
+| `get_contact_history` | `name: string`、`limit?`（默认 8） | 该人完整属性时间线 + 最近 N 条事件；找不到时返回 `{ found: false, message }` |
+| `create_contact` | `name`（必填）+ phone / email / industry / company / position / project / relation + `reason?` | 只返回 `{ draft }`；同名已存在时返回 `{ error }`，提示改用 `update_contact` |
+| `update_contact` | `target_name`（必填）+ 任意要改字段 + `reason?` | 只返回 `{ draft, current }`；目标不存在或字段全无变化时返回 `{ error }` |
+| `create_meeting` | `title` / `start_time`（必填，带偏移 ISO 8601）/ `end_time?` / `participants`（非空数组）/ `location?` / `remark?` / `reason?` | 只返回 `{ draft }`；时间格式非法或结束早于开始时返回 `{ error }`；省略结束时间按 60 分钟补齐 |
 
-`search_contact` 需要设备通讯录快照：从本轮请求的 `contactsSnapshot` 里匹配姓名与电话，用于填 `inDevice`。
+`search_contact` 需要设备通讯录快照：从本轮请求的 `contactsSnapshot` 里按姓名归一化或电话后 7 位匹配，用来填 `inDevice`。
 
-## 八、接口
+## 九、HTTP 接口
 
-除两个会出字的接口（发消息、确认）走 `text/event-stream` 外，其余返回 JSON。
+除两条出字的接口（发消息、确认）返回 `text/event-stream` 外，其余都是 JSON。所有错误返回 `{ error: string }`。
 
-### `POST /api/threads`
+| 方法 | 路径 | 入参 | 出参 |
+| --- | --- | --- | --- |
+| GET | `/api/health` | — | `{ ok, model, time }` |
+| POST | `/api/threads` | `{ title? }` | `{ threadId }` |
+| GET | `/api/threads` | — | `ThreadSummary[]`，`updatedAt` 倒序 |
+| PATCH | `/api/threads/:id` | `{ title?, contactName? }` | `{ ok }` |
+| DELETE | `/api/threads/:id` | — | `{ ok }`，连消息一起删 |
+| GET | `/api/threads/:id/messages` | — | `ChatMessage[]`，卡片带 `confirmed` 标记（按 `confirmed_cards` 判定），带 `trace` |
+| POST | `/api/threads/:id/messages` | `{ text?, imageBase64?, contactsSnapshot? }` | SSE |
+| POST | `/api/threads/:id/confirm` | `{ cards: [{ id, kind, reason?, payload }] }` | SSE |
+| POST | `/api/demo/reset` | — | `{ ok, createdNames, meetingTitles }`，清业务数据 + 会话表，回传要从系统侧删掉的名单 |
 
-请求 `{ title?: string }` → 返回 `{ threadId }`。内部用 Mastra memory 建 thread。
+`contactsSnapshot` 最多 200 条，只含 `name` / `company` / `position` / `phones`。
 
-### `GET /api/threads`
+### 发消息（`routes/messages.ts`）
 
-返回会话列表：
+1. 校验：`text` 与 `imageBase64` 至少一个；`imageBase64` 超过 12MB 直接 400
+2. 先落一条 user 消息（`messages` 表）
+3. 组装 content：有图 → `{ type: 'image', image: Buffer.from(base64,'base64'), mediaType }`，mediaType 按文件头判断（`/9j/` JPEG、`iVBORw0KGgo` PNG、`UklGR` WebP，默认 JPEG）；再附文字，未传文字时用默认句「请读这张截图里的商务信息，把能确定的内容整理成记录。」
+4. `requestContext.set('contactsSnapshot', ...)`，`bizAgent.stream(...)`，`maxSteps: 5`
+5. 消费 `stream.fullStream`，逐帧转发（见第十节）
+6. 收尾：正文为空时用兜底文案（有卡片「整理好了，看一眼对不对。」，无卡片「没有识别到可记录的信息。」）；落 assistant 消息（文本 + 卡片 + 链路）→ 推 `done`；首轮无标题时生成标题 → 推 `title`
+7. 客户端断开或流异常：删掉本轮 user 消息，不写 assistant 消息
 
-```json
-[{ "id": "...", "title": "王建国", "contactName": "王建国", "lastMessage": "已帮你建好…", "updatedAt": "2026-10-29T12:00:00+08:00" }]
-```
+### 确认（`routes/confirm.ts`）
 
-按 `updatedAt` 倒序。
+1. `confirmCards()` 单事务落库：`create_contact` 新建或按姓名合并、`update_contact` 更新目标属性、`create_meeting` 写一条 meeting 事件；每张卡写一条 interaction，共用同一个 `groupId`
+2. `markCardsConfirmed()` 写 `confirmed_cards`
+3. 事务提交后**立即**推 `written`（客户端拿到就开始写系统通讯录/日历）
+4. 无洞察素材时走 `streamFailureNote`，仍无文字则用 `statusNote()` 模板兜底（几张成了、哪张没成、为什么）
+5. 有素材时 `streamInsight()` 逐字推 `text`，结束后推 `done`
 
-### `GET /api/threads/:id/messages`
+洞察只走流，不写入消息表。
 
-返回该 thread 的消息数组，元素结构同 `ChatMessage`。卡片从 assistant 消息的 tool 结果还原；`imageBase64` 只回显用户自己发的图。
+## 十、SSE 协议
 
-### `POST /api/threads/:id/messages` → `text/event-stream`
+一行 `data: <json>`，帧类型放在 JSON 的 `type` 字段里；客户端只按行读、只认 `data:` 前缀。心跳用 `withSseHeartbeat(response, 15000)`，只在两帧之间插 `: heartbeat` 注释。
 
-请求：
+| `type` | 载荷 | 出现于 | 说明 |
+| --- | --- | --- | --- |
+| `start` | `{ threadId, messageId }` | 发消息 | 建流后立即发 |
+| `reasoning` | `{ delta }` | 发消息 | 模型思考增量，客户端往后接 |
+| `tool` | `{ step: TraceStep }` | 发消息 | 工具调用一步；同一 `id` 再来一帧表示状态变化（running → ok/error） |
+| `text` | `{ delta }` | 两条流 | 正文 / 洞察增量 |
+| `card` | `{ card }` | 发消息 | 三个出卡工具一返回就推 |
+| `written` | `{ written: [{ cardId, kind, contactName, background, ok, error? }], contactName }` | 确认 | 事务提交后第一帧 |
+| `done` | `{ message?, insight?, contactName?, title? }` | 两条流 | 结束帧；发消息带落库后的完整消息，确认带洞察全文 |
+| `title` | `{ title }` | 发消息 | `done` 之后补的会话标题 |
+| `error` | `{ error }` | 两条流 | 中途失败 |
 
-```json
-{ "text": "可选", "imageBase64": "可选，JPEG base64", "contactsSnapshot": [{ "name": "", "company": "", "position": "", "phones": [] }] }
-```
+约定：
 
-处理：
+- 卡片帧先于文字到达（模型先调工具后写字）；客户端把它们收在 `done` 的正式消息里一起渲染
+- `done` 是权威：正文以它为准覆盖增量
+- 客户端断开 → 停止消费上游、删掉本轮 user 消息、不写 assistant 消息
+- 链路（`reasoning` / `tool`）随流下发，同时按顺序落进 `messages.trace`，重开会话时照原样还原
 
-1. 组装 user 消息（有图时带 `image` part：`{ type: 'image', image: Buffer.from(base64, 'base64'), mediaType: 'image/jpeg' }`）
-2. `const stream = await bizAgent.stream(...)`，带 `memory: { thread: id, resource: 'owner' }` 与 `maxSteps: 5`
-3. 边消费 `stream.fullStream` 边转发：
-   - `chunk.type === 'text-delta'` → 推 `text`（`chunk.payload.text`）
-   - `chunk.type === 'tool-result'` 且 `chunk.payload.toolName` 是三个出卡工具 → 把 `chunk.payload.result.card` 作为 `card` 事件立即推送
-4. 流结束：落库 assistant 消息（累积文本 + 卡片），再推 `done`
+### 链路的中文标签
 
-### SSE 协议（两个流式接口共用）
+`services/trace.ts` 维护工具名 → 标签映射，未知工具回落成原工具名：
 
-每条事件是一行 `data: <json>`，**不使用 SSE 的 `event:` 名**，JSON 里必带 `type`。客户端只按行读、只认 `data:` 前缀，Swift 侧解析成本最低。
+| 工具 | 标签 |
+| --- | --- |
+| `search_contact` | 查联系人 |
+| `search_interactions` | 查往来记录 |
+| `get_contact_history` | 查履历 |
+| `create_contact` | 整理联系人 |
+| `update_contact` | 整理资料更新 |
+| `create_meeting` | 安排会议 |
 
-| `type` | 载荷 | 说明 |
-| --- | --- | --- |
-| `start` | `{ threadId, messageId }` | 建流后立即发 |
-| `text` | `{ delta }` | 增量文本，客户端自行拼接 |
-| `card` | `{ card }` | 出卡工具一返回就推，早于文字结束 |
-| `done` | `{ message }` 或 `{ insight, contactName }` | 结束帧，正文以它为准覆盖增量 |
-| `error` | `{ error }` | 中途失败；客户端保留已收片段并给「重试」 |
+`detail` 从入参里按 `query` → `target_name` → `name` → `title` 顺序取第一个非空值（截断 40 字）。`snapshot()` 落库前过滤掉纯空白思考段。
 
-- 心跳用 `@mastra/ai-sdk` 的 `withSseHeartbeat(response, 15000)`：空闲时在两帧之间插 `: heartbeat` 注释，不打断帧
-- 客户端断开 → 服务端停止消费上游、删掉本轮用户消息，不写 assistant 消息
-- 卡片不等整段文字结束：用户看到卡片的时机从「回复结束」提前到「工具返回」
+## 十一、洞察生成
 
-### `POST /api/threads/:id/confirm` → `text/event-stream`
+`services/insight.ts`，用 `ai` 的 `streamText`（`deepseek-flash`，不带工具），`textStream` 每个 chunk 直接推 `text` 帧；结束后把全文留在 `done` 里。
 
-请求：
+输入：该联系人全部 `attributes`（含 history）、最近 8 条 `interactions`、本次刚写入的 `interactions`。
 
-```json
-{ "cards": [{ "id": "", "kind": "create_contact", "payload": {} }] }
-```
+要求：1–3 句中文，先说时间线上的一个具体事实（认识多久、换过什么、上次见面距今多久），再给一条可执行的下一步建议（问什么、约谁、什么时候）。
 
-处理（`services/confirm.ts`，单事务）：
+约束：只用输入里存在的信息；不出现「依据」「根据记录」这类标签；不写「保持联系」「继续跟进」这类空话；不超过 120 字。
 
-1. 逐张卡落库：`create_contact` 新建或按姓名合并；`update_contact` 更新目标联系人属性；`create_meeting` 写一条 meeting 事件，挂在**当前会话主联系人**名下（`participants` 存全名单，1 人写名字、2 人写两个名字、3 人以上写「张三等 4 人」由前端渲染，数据库存原数组）
-2. 每张卡写一条 `interaction`，共用同一个 `groupId`
-3. 事务提交后重算受影响联系人的 `searchCurrent` / `searchHistory` / `embedding`
-4. 立即推 `written`（`{ written: [{ cardId, kind, contactName, background, ok, error? }], contactName }`）——客户端拿到这一帧就开始写系统通讯录 / 日历
-5. 调 `services/insight.ts`，边生成边推 `text`，结束后推 `done`
+## 十二、iOS 客户端
 
-`insight` 只走流、不写入 thread 消息。
+### 工程配置（`project.yml`）
 
-## 九、洞察生成
+iOS 17.0、`PRODUCT_BUNDLE_IDENTIFIER = com.newking.bizsnap`、竖屏、`Info.plist` 里给通讯录 / 日历（读写与只写）/ 相册 / 相机 / 本地网络五类权限文案，`NSAppTransportSecurity` 放行 `127.0.0.1` 与 `localhost` 明文 HTTP，`NSAllowsLocalNetworking = true`。服务地址默认 `http://127.0.0.1:8787`，存在 `AgentClient` 里，设置页可改。
 
-`services/insight.ts`，用 `ai` 的 `streamText`（`deepseek-flash`，不带工具），把 `textStream` 的每个 chunk 直接推成 `text` 帧；流结束后拼出全文留在 `done` 里。需要非流式的场合（比如脚本里）才用 `generateText`。
+### 主题（`Theme/Tokens.swift`）
 
-输入：
-
-- 该联系人全部 `attributes`（含 `history`）
-- 最近 8 条 `interactions`（含 `at`、`kind`、`background`、`meeting`）
-- 本次刚写入的 `interactions`
-
-要求模型输出 1–3 句中文，结构固定：
-
-1. 先陈述时间线上一个具体事实（认识多久、换过什么、上次见面距今多久）
-2. 再给一条可执行的下一步建议（问什么、约谁、什么时候）
-
-约束：
-
-- 只用输入里存在的信息，不推测
-- 不出现「依据」「根据记录」这类标签
-- 不写空话（「保持联系」「继续跟进」这种）
-- 中文，不超过 120 字
-
-## 十、iOS 规格
-
-`project.yml`：iOS 17.0、bundle `com.bizsnap.app`、`NSContactsUsageDescription`、`NSCalendarsFullAccessUsageDescription`、`NSAppTransportSecurity.NSAllowsLocalNetworking = true`。服务地址默认 `http://127.0.0.1:8787`，设置页可改。
-
-### 主题
-
-跟随系统外观。`Theme` 里每个语义色给两套取值，由系统在浅色/深色间切换。
+跟随系统外观，同一语义色两套取值：
 
 | 语义 | 浅色 | 深色 |
 | --- | --- | --- |
-| 背景 | `#F4F5F7` | `#0E0F12` |
-| 卡片底 | `#FFFFFF` | `#16181D` |
-| 浮层 | `#FFFFFF` | `#1E2128` |
-| 主色 | `#3D6EF0` | `#5B8CFF` |
-| 主色浅 | `#5B8CFF` | `#7AA2FF` |
-| 正文 | `#111318` | `#F2F3F5` |
-| 次要 | `#565E6C` | `#A0A6B0` |
-| 弱 | `#8A91A0` | `#6B7280` |
-| 成功 / 警示 / 错误 | `#1FA84E` / `#E08600` / `#E03127` | `#34C759` / `#FF9F0A` / `#FF453A` |
+| background | `#F5F5F3` | `#0B0B0A` |
+| surface | `#FCFCFB` | `#151515` |
+| elevated | `#FFFFFF` | `#1A1A19` |
+| inset | `#F0F0EE` | `#20201E` |
+| accent | `#3D6EF0` | `#5B8CFF` |
+| accentSoft | `#5B8CFF` | `#7AA2FF` |
+| textPrimary | `#111318` | `#E9EBEF` |
+| textSecondary | `#565E6C` | `#9BA1AB` |
+| textTertiary | `#8A91A0` | `#6B7280` |
+| green / orange / red | `#1FA84E` / `#E08600` / `#E03127` | `#34C759` / `#FF9F0A` / `#FF453A` |
+| stroke | 黑 | 白 |
 
-1px 描边与分隔线：浅色下用黑、深色下用白，再叠加各自的透明度。圆角 16，间距基数 8。字号：标题 28 加粗、条目标题 16 半粗、正文 15、辅助 12。
+圆角 16，间距基数 8；`glassCard` 修饰符统一「半透明叠加 + 1px 细边」；`accentGradient` 用于主按钮。
 
-### 页面一：会话列表
+### 页面结构
 
-- 顶部：左「会话」28 加粗；右侧设置入口（填入演示联系人、服务地址、清空数据）
-- 行：48pt 高，左侧 40pt 圆形首字头像，中间联系人名 16 半粗 + 最后一条消息摘要 14 灰单行截断，右侧时间 12 灰
-- 空态：虚线描边卡，文案「把一段商务对话变成通讯录里的一条记录」，下方主按钮「开始第一段对话」
-- 右下角 56pt 圆形加号按钮，蓝色渐变
+打开即聊天（`RootView`）：最近一次会话直接恢复，左边抽屉（`ThreadDrawer`）切会话 / 新建 / 改名 / 删除，抽屉底部进设置。
 
-### 页面二：会话详情
+**聊天页（`ChatView`）**
 
-- 导航栏：返回 + 会话标题（可点改名）+ 右侧服务状态圆点（在线绿 / 离线灰）
-- 消息流间距 12：
-  - 用户文字：右对齐蓝色气泡，圆角 16，最大宽度 78%
-  - 用户图片：圆角 12，最大高度 240，点击全屏
-  - agent 文字：左对齐深灰气泡，圆角 16，最大宽度 78%
-  - **卡片**：整宽窄条，高 64。左侧类型文案（创建联系人 / 创建会议 / 更新联系人）16 半粗，右侧 22pt 圆形勾选框。**不显示任何字段、不显示时间、不显示依据**。选中时描边变主色、整体缩放 1.02。确认后原地折叠成一行「已写入通讯录 ›」。非最新一批的卡片整体 40% 透明、勾选框禁用
-- 底部：吸底输入栏。左侧「+」打开相册/拍照，中间圆角输入框占位「说点什么，或贴一张聊天截图」，右侧发送按钮（有内容时点亮）。选图后输入框上方显示缩略图与「×」
-- 发送后先插入两条灰色骨架占位；收到第一个 `text` / `card` 事件就换成真实气泡，文字随 `delta` 增长
-- 卡片可以**先于文字**出现：`card` 帧一到就渲染窄卡，此时正文可能还在打字
-- 流中断时保留已收片段，在该消息下方显示浅红提示条 +「重试」
-- 出错时在该消息位置显示浅红提示条 +「重试」，不弹全局弹窗
+- 顶部：左汉堡开抽屉，中间标题（可点改名）+ 服务状态圆点，右侧 `confirming` 时显示小菊花
+- 消息流：气泡 + 卡片，`AgentTraceView` 在气泡上方
+- 空态：一句轻提示「把一段商务对话，变成通讯录里的一条记录」
+- 流式气泡：首字之前显示竖条 loading（`TypingBars`：5 根 3×15 胶囊，`scaleEffect(y:)` 在 1 ↔ 0.3 之间，每根延迟 0.1s、0.45s 一次往返，颜色 `textSecondary`）；首字到达后换成真实气泡 + 光标
+- 输入栏（`Composer`）：左「+」开相册/拍照，中间输入框，右侧发送；选图后上方显示缩略图与「×」
+- 卡片全部收在消息里，不单独成区
 
-### 卡片交互
+**会话列表（抽屉）**：每行首字头像 + 标题 + 最后一句摘要 + 时间；顶部「BizSnap」+ 新建按钮；行左滑删除、长按改名。
 
-- 只有**最后一条含卡片的 agent 回复**里的卡片可勾选；更早的置灰不可点
-- 多选，底部吸底按钮显示「确认选中 N 项」，点击后提交 `/api/threads/:id/confirm`
-- 提交流程：服务端落库成功 → 逐张调本地 Contacts / EventKit → 单张失败只标红该卡并给重试，其余照常折叠
-- 卡片不可编辑；内容不对就在输入栏继续说一句，agent 重新出卡，旧卡自动置灰
+**设置页**：服务地址输入与保存、健康检查、清空全部数据（调 `/api/demo/reset`，再按回传名单删系统侧联系人 / 日历事件）。
 
-### 权限与演示数据
+### 卡片（`CardStrip`）
 
-- 首次使用通讯录 / 日历前，先弹一句解释文案再请求权限
-- 设置页「填入演示联系人」写 6–8 位覆盖「换行业 / 换公司 / 换职位」三类变化的人
+- 整宽窄条：左侧类型文案（创建联系人 / 创建会议 / 更新联系人），右侧圆形勾选框；不显示字段、时间、依据
+- 同类型只认最后一张：更早的同类型卡 40% 透明、勾选框禁用；不同类型互不影响
+- 选中：描边变 accent、整体轻微放大
+- 流式阶段用 `pending` 样式不可点；`done` 之后才参与勾选
+- 确认成功后原地折叠成一行状态话术：写进日历「已写入日历」、写进通讯录「已写入通讯录」；服务端已落库但系统未写入时不能显示「已写入」
+- 单张卡片写入失败：标红 + 重试按钮，权限类错误给「去设置」
 
-## 十一、实现顺序
+### 确认条
 
-1. `server` 骨架：package.json、tsconfig、config、index（Hono 能起服务）
-2. `scripts/check-embedding.ts` 与 `scripts/check-vision.ts`，跑通再往下
+- 有勾选时出现在输入栏上方，文案「确认选中 N 项」，主色渐变；`confirming` 时禁用并显示菊花
+- 点确认先做日历权限判断（会议卡且未授权时弹解释），再发起 `/confirm`
+- `written` 到达 → 逐张写系统（`CardExecutor` + `ContactsService` / `CalendarService`），成功折叠、失败标红；同时 agent 会补一条文字说明为什么没成
+- 写库成功才收起；失败或部分失败时按钮留在原处可再次提交
+- 条出现时气泡区同步让位：先贴底，再从底部升起
+
+### 链路展示（`AgentTraceView`）
+
+- 左侧一根竖向细线，右侧按顺序排思考与工具行
+- 思考：11.5pt 斜体、`textTertiary`、最多 2 行截断
+- 工具行：SF Symbol 图标 + 中文标签 + `· 入参`；右端状态：调用中空心圆、成功对勾、失败感叹号
+- 整体 `opacity 0.72` + 低透明度大半径阴影（朦胧感）+ 3.4s 往返的 ±1px 缓慢浮动；新行淡入
+- 流式阶段随事件长出来（`reasoning` 逐字追加，`tool` 按 id 就地改状态），`done` 之后由正式消息的 `trace` 接管
+
+### 滚动
+
+- 贴底滚动统一指向消息列表末尾的一个恒定空视图，它常驻在列表里
+- 消息数变化、卡片出现、确认条出现/收起、错误条出现、链路变长 → 贴底；卡片浮现这类延后占位的情况在动画收尾时补滚一次
+- 逐字流式时直接贴底，不加动画
+
+### 图片
+
+- 发送前压缩：按总像素不超过 1300×1300 等比缩放、JPEG 质量 0.7（对齐 DeepSeek 视觉对每图缩放的上限）
+- 回显解码结果按消息 id 缓存（`NSCache`）
+
+### 反馈规则
+
+任何一次交互都要落一句话到消息流里：
+
+- 失败时有半截内容就留半截，一句都没有就补一句人话（`AgentFeedback` 统一措辞），绝不产生空消息
+- 卡片类失败就地标红 + 重试，同时补一条 agent 文字说清为什么没成、下一步做什么
+- 服务端确认流由 `statusNote()` 兜底，不能只发一个空的 `done`
+
+## 十三、脚本
+
+| 脚本 | 作用 |
+| --- | --- |
+| `scripts/env.ts` | 从 `server/.env` 读 key；找不到文件就提示复制 `.env.example` |
+| `scripts/check-embedding.ts` | 调 `BAAI/bge-large-zh-v1.5` 嵌入一句中文，打印维度并断言 1024 |
+| `scripts/check-vision.ts` | 现场画一张 512×512 PNG，发给 `deepseek-flash` 问「描述图片内容」；失败时改用 `createOpenAICompatible({ baseURL: 'https://api.deepseek.com' })` 再试一次 |
+| `scripts/reindex-embeddings.ts` | 遍历全库重写 `searchCurrent` / `searchHistory` / `embedding`（`pnpm reindex`） |
+| `scripts/ios-run.sh` | 编译 → 装进已启动的模拟器（默认 iPhone 17）→ 启动 app；`bash scripts/ios-run.sh [UDID]` |
+
+脚本只用 Node 内置模块与全局 `fetch`，通过 `server/package.json` 的 npm script 调用（`tsx ../scripts/xxx.ts`）。
+
+## 十四、实现顺序
+
+1. `server` 骨架：package.json、tsconfig、config、index（Hono 起服务、`/api/health`）
+2. `scripts/check-embedding.ts` 与 `scripts/check-vision.ts` 跑通
 3. `db/`：建表、读写、检索
-4. `mastra/`：agent + prompt + 五个工具（先只读两个，再三个草案）
-5. `services/`：attributes、embedding、confirm、insight
-6. `routes/`：Hono 路由 + SSE（messages、confirm 两条流；其余返回 JSON）
-7. `BizSnap`：XcodeGen 工程 + 会话列表 + 消息流 + 输入栏
-8. 卡片窄条、多选、确认、旧卡置灰
-9. Contacts / EventKit 写入与演示数据
-10. 验收三个 Case
+4. `mastra/`：agent + prompt + 六个工具（先三个只读，再三个出草案）
+5. `services/`：attributes、embedding、confirm、insight、trace、demo-seed
+6. `routes/`：threads、messages、confirm、demo；两条 SSE 流按第十节帧表实现
+7. iOS：XcodeGen 工程 + 主题 + 聊天页 + 抽屉 + 设置
+8. 卡片窄条、多选、确认条、系统写入
+9. 链路展示、loading、滚动与错误反馈
+10. 按第十五节验收
 
-## 十二、验收
+## 十五、验收
 
-前置：`pnpm dev` 起服务；`xcodegen generate` 后运行模拟器；设置页填入演示联系人；`pnpm tsx scripts/seed-demo.ts` 灌历史。
+前置：`pnpm dev` 起服务，`bash scripts/ios-run.sh` 装 app，设置页填服务地址、需要时「清空全部数据」。从空库开始，数据全部由对话 + 确认产生。
 
-**Case 1（卡片）**：发一张带姓名、公司、约见时间的聊天截图。预期：agent 正文**先逐字出现**，卡片在正文之后才显示；正文说清建谁、约在何时；出现「创建联系人」「创建会议」两张卡；勾选确认后写入系统通讯录与日历。
+**Case 1 截图 → 卡片**：发一张含姓名、公司、职位、约见时间的商务聊天截图。
+预期：正文逐字出现，卡片在正文之后显示；正文说清建谁、什么公司职位、约在何时、去哪里；出现「创建联系人」+「创建会议」两张卡；链路里能看到「查联系人」「整理联系人」「安排会议」；勾选两张 →「确认选中 2 项」→ 确认后折叠，系统通讯录与日历里能看到对应条目。
 
-**Case 2（跨会话找回）**：新建会话，只说「上次做跨境支付那个，最近有联系吗」。预期：agent 自行检索并报出该人，正文体现出他过去与现在的区别。追加一句「现在谁在做跨境支付」，不再报已转岗的那位。
+**Case 2 跨会话找人**：新建会话，只说「上次做跨境支付那个，最近有联系吗」。
+预期：agent 自己检索，报出命中的人（如陈默 / 李静），一句话问清是哪一位；正文体现过去与现在的区别。追加「现在谁在做跨境支付」，`when='now'` 生效，只报当前仍在做这件事的人。
 
-**Case 3（更新与洞察）**：发一张「老李从 A 公司跳到 B 公司，还在管合规」的截图。预期：出现「更新联系人」卡片；确认后卡片立即折叠、旧公司进历史；**随后洞察逐字流出来，含基于时间线的具体事实 + 一条可执行的跟进建议**。
+**Case 3 更新与洞察**：发「李静已经从 C 公司跳到 D 公司了，还在管供应链，项目也从供应链优化换成了仓储自动化」。
+预期：出现一张「更新联系人」卡；正文写清公司 C → D、项目变更，职位未提新头衔时保留；确认后卡片折叠，`attributes` 里 `company.value = D 公司`、`since = 今天`、`history` 多出 C 公司那段；随后洞察逐字流出，含基于时间线的具体事实 + 一条可执行的跟进建议。
 
-**Case 4（不落库）**：出一张卡但不确认，退出再进。预期：数据库无该记录。
+**Case 4 不落库**：出一张卡但不确认，退出再进。
+预期：库里查不到该人，聊天记录与卡片仍在。
 
-## 十三、自检脚本
+**Case 5 非商务输入**：发「哈哈哈今天好累啊，晚上吃啥」。
+预期：只回「未识别到商务信息」，不调工具、不出卡。
 
-`scripts/check-embedding.ts`：读 `SILICONFLOW_API_KEY`，调 `BAAI/bge-large-zh-v1.5` 嵌入一句中文，打印维度，断言 1024。
+## 十六、硬性约束
 
-`scripts/check-vision.ts`：用 `deepseek('deepseek-flash')` 传一张本地图片（base64）+ 一句「描述图片内容」，打印回复。若报错，改用 `createOpenAICompatible({ baseURL: 'https://api.deepseek.com' })` + 同名模型，再跑一次。
-
-`scripts/seed-demo.ts`：直接写库，插入 3 位联系人与若干历史事件，其中一位保留「做过跨境支付、现已转岗」的时间线，供 Case 2 演示。
+- 六个工具只读或只出草案；写库只发生在确认接口，单事务
+- `history` 与检索列只由确认流程派生，任何读取路径不写
+- `background` 只复述输入里出现的原因，没有依据就留空
+- 跨会话找人只走数据库检索，不用聊天消息向量召回
+- 洞察只回给前端，不落库
+- 卡片只读：内容不对就在输入栏继续说一句，agent 重出卡片，旧卡自动置灰
+- 系统通讯录只能承载 name / phone / email / company / position；industry / project / relation 只在本应用内
+- 以本地库为准，先落库再写系统：通讯录写错不可撤回
+- 时间一律带时区偏移的 ISO 8601；iOS 写 EventKit 前用 `ISO8601DateFormatter` 校验
