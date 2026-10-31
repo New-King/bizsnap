@@ -315,11 +315,11 @@ struct ChatView: View {
         .padding(.top, 110)
     }
 
-    /// 等首字：气泡里三个点依次上浮，比两条灰条更像「正在想」
+    /// 等首字：气泡里几根竖条上下起伏，比静态骨架更像「正在想」
     private var skeleton: some View {
-        TypingDots()
-            .padding(.horizontal, 16)
-            .padding(.vertical, 16)
+        TypingBars()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(Theme.surface)
@@ -780,28 +780,30 @@ struct ImagePreviewItem: Identifiable {
     let image: UIImage
 }
 
-/// 首字到达前的等待：三个点依次上浮。
-/// 点色走 Theme.textSecondary（浅色偏深、深色偏亮），两种模式下都不会糊在气泡底上。
-private struct TypingDots: View {
+/// 首字到达前的等待：5 根竖条上下起伏，像电平表。
+/// 每根按索引错开 0.1s、0.45s 走完一次往返，整体压在 18pt 内，不撑高气泡。
+/// 颜色走 Theme.textSecondary（浅色偏深、深色偏亮），两种模式下都不会糊在气泡底上。
+private struct TypingBars: View {
     @State private var animating = false
 
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
+        HStack(alignment: .center, spacing: 4) {
+            ForEach(0..<5, id: \.self) { index in
+                Capsule(style: .continuous)
                     .fill(Theme.textSecondary)
-                    .frame(width: 7, height: 7)
-                    .offset(y: animating ? -3 : 0)
-                    .opacity(animating ? 1 : 0.42)
+                    // 缩放而不是改 frame：只走图形层，不会每一帧触发重排
+                    .frame(width: 3, height: 15)
+                    .scaleEffect(y: animating ? 0.3 : 1, anchor: .center)
+                    .opacity(animating ? 1 : 0.55)
                     .animation(
                         .easeInOut(duration: 0.45)
                             .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.14),
+                            .delay(Double(index) * 0.1),
                         value: animating
                     )
             }
         }
-        .frame(height: 18)
+        .frame(width: 34, height: 18)
         .onAppear { animating = true }
         .onDisappear { animating = false }
     }
