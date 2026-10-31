@@ -6,7 +6,8 @@ struct MessageBubble: View {
 
     var body: some View {
         VStack(alignment: message.isUser ? .trailing : .leading, spacing: 6) {
-            if let base64 = message.imageBase64, let picked = ImageCompressor.image(fromBase64: base64) {
+            if let base64 = message.imageBase64,
+               let picked = ImageCompressor.image(fromBase64: base64, cacheKey: message.id) {
                 Image(uiImage: picked)
                     .resizable()
                     .scaledToFill()

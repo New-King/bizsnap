@@ -17,8 +17,18 @@ enum ImageCompressor {
         return resized.jpegData(compressionQuality: quality)?.base64EncodedString()
     }
 
-    static func image(fromBase64 base64: String) -> UIImage? {
-        guard let data = Data(base64Encoded: base64) else { return nil }
-        return UIImage(data: data)
+    /// 解码结果按 key 缓存。气泡的 body 每次状态变化都会重算，一张 600KB 的截图若每次都重新解码，
+    /// 勾选、切 loading 这类动作都会先卡一下主线程。
+    private static let decoded = NSCache<NSString, UIImage>()
+
+    static func image(fromBase64 base64: String, cacheKey: String? = nil) -> UIImage? {
+        if let cacheKey, let cached = decoded.object(forKey: cacheKey as NSString) {
+            return cached
+        }
+        guard let data = Data(base64Encoded: base64), let image = UIImage(data: data) else { return nil }
+        if let cacheKey {
+            decoded.setObject(image, forKey: cacheKey as NSString)
+        }
+        return image
     }
 }
