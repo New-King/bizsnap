@@ -109,8 +109,9 @@ struct ChatView: View {
                             Color.clear.frame(height: 1).id(scrollBottomAnchor)
                         }
                     }
-                    // 打开会话先停在最新一条（带卡片的那条），不用手动往下拖
-                    .defaultScrollAnchor(.bottom)
+                    // 注意：不要用 .defaultScrollAnchor(.bottom)。它会把「内容不足一屏」的会话整体顶到底部，
+                    // 首页出现大片空白、消息看起来挤在下面；内容增长时它还会和手动 scrollTo 抢位置，逐字滚动就会抖。
+                    // 打开已有会话靠 messages.count 那一次 pinToBottom 贴底即可。
                     // 拖动立刻收键盘；点空白处也收，但不抢消息里的点击
                     .scrollDismissesKeyboard(.immediately)
                     .simultaneousGesture(TapGesture().onEnded { hideKeyboard() })
@@ -126,8 +127,11 @@ struct ChatView: View {
                         guard isConfirming else { return }
                         pinToBottom(proxy)
                     }
-                    // 卡片随工具返回一张张冒出来：每来一张都贴底，别让最后一张停在屏幕外
-                    .onChange(of: streamingCards.count) { _, _ in pinToBottom(proxy) }
+                    // 卡片随工具返回一张张冒出来：立刻贴底（不带动画），免得和逐字滚动抢同一段动画。
+                    // 收尾时的最终位置由 messages.count 那次 pinToBottom 负责
+                    .onChange(of: streamingCards.count) { _, _ in
+                        proxy.scrollTo(scrollBottomAnchor, anchor: .bottom)
+                    }
                     // 确认条出现 / 收起会把气泡区压矮，同样要重新贴底，否则最后一张卡被切一半
                     .onChange(of: pickedCards.count) { _, _ in pinToBottom(proxy) }
                     .onChange(of: errorText) { _, _ in pinToBottom(proxy) }
