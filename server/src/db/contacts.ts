@@ -232,6 +232,74 @@ export async function searchInteractionsByKeywords(
   return scored.slice(0, limit).map((item) => ({ ...item.interaction, contactName: item.contactName, hits: item.hits }));
 }
 
+/** 列联系人：可按关系、最近往来时间过滤，按最近联系时间倒序 */
+export async function listRecentContacts(
+  options: { since?: string; limit?: number },
+  exec: Executor = defaultExec,
+): Promise<ContactRecord[]> {
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (options.since) {
+    where.push('(last_contact_at IS NOT NULL AND last_contact_at >= ?)');
+    args.push(options.since);
+  }
+  args.push(options.limit ?? 10);
+
+  const { rows } = await exec.execute({
+    sql: `SELECT * FROM contacts ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY last_contact_at DESC, updated_at DESC
+      LIMIT ?`,
+    args: args as never,
+  });
+  return rows.map(rowToContact);
+}
+
+/** 列事件：按时间倒序，可按类型、起始时间、联系人过滤 */
+export async function listInteractionsByFilter(
+  options: { kind?: Interaction['kind'] | 'any'; since?: string; contactName?: string; limit?: number },
+  exec: Executor = defaultExec,
+): Promise<InteractionHit[]> {
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (options.kind && options.kind !== 'any') {
+    where.push('i.kind = ?');
+    args.push(options.kind);
+  }
+  if (options.since) {
+    where.push('i.at >= ?');
+    args.push(options.since);
+  }
+  if (options.contactName?.trim()) {
+    where.push('c.name = ?');
+    args.push(options.contactName.trim());
+  }
+  args.push(options.limit ?? 10);
+
+  const { rows } = await exec.execute({
+    sql: `SELECT i.*, c.name AS contact_name
+      FROM interactions i
+      LEFT JOIN contacts c ON c.id = i.contact_id
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY i.at DESC
+      LIMIT ?`,
+    args: args as never,
+  });
+
+  return rows.map((row) => ({
+    id: str(row.id),
+    contactId: str(row.contact_id),
+    groupId: str(row.group_id),
+    at: str(row.at),
+    kind: str(row.kind) as Interaction['kind'],
+    source: str(row.source) as Interaction['source'],
+    attrs: JSON.parse(str(row.attrs) || '[]') as string[],
+    background: str(row.background),
+    meeting: row.meeting ? (JSON.parse(str(row.meeting)) as Interaction['meeting']) : undefined,
+    contactName: str(row.contact_name),
+    hits: 0,
+  }));
+}
+
 export async function insertInteraction(
   interaction: Interaction,
   exec: Executor = defaultExec,

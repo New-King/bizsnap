@@ -5,6 +5,8 @@ import { buildPrompt } from './prompt.js';
 import { createContact } from './tools/create-contact.js';
 import { createMeeting } from './tools/create-meeting.js';
 import { getContactHistory } from './tools/get-history.js';
+import { listContacts } from './tools/list-contacts.js';
+import { listInteractions } from './tools/list-interactions.js';
 import { searchContact } from './tools/search-contact.js';
 import { searchInteractions } from './tools/search-interactions.js';
 import { updateContact } from './tools/update-contact.js';
@@ -25,6 +27,8 @@ export const bizAgent = new Agent({
     search_contact: searchContact,
     search_interactions: searchInteractions,
     get_contact_history: getContactHistory,
+    list_contacts: listContacts,
+    list_interactions: listInteractions,
     create_contact: createContact,
     update_contact: updateContact,
     create_meeting: createMeeting,

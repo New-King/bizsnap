@@ -5,6 +5,8 @@ const LABELS: Record<string, string> = {
   search_contact: '查联系人',
   search_interactions: '查往来记录',
   get_contact_history: '查履历',
+  list_contacts: '列联系人',
+  list_interactions: '列往来',
   create_contact: '整理联系人',
   update_contact: '整理资料更新',
   create_meeting: '安排会议',
@@ -18,6 +20,15 @@ function detailOf(args: unknown): string | undefined {
     const value = record[key];
     if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 40);
   }
+  // 列事件时按类型显示，比空着更有信息量
+  const kindLabels: Record<string, string> = {
+    meeting: '会议',
+    created: '新建',
+    updated: '更新',
+    any: '全部',
+  };
+  const kind = record.kind;
+  if (typeof kind === 'string' && kindLabels[kind]) return kindLabels[kind];
   return undefined;
 }
 

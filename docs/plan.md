@@ -88,6 +88,8 @@ bizsnap/
 │       │       ├── search-contact.ts
 │       │       ├── search-interactions.ts
 │       │       ├── get-history.ts
+│       │       ├── list-contacts.ts
+│       │       ├── list-interactions.ts
 │       │       ├── create-contact.ts
 │       │       ├── update-contact.ts
 │       │       └── create-meeting.ts
@@ -291,19 +293,19 @@ export const bizAgent = new Agent({
 
 ### 系统提示（`buildPrompt()`）
 
-每次请求重建，注入当前时间（`Asia/Shanghai`，含星期）。规则按组给出，全部是硬性的：
+每次请求重建，注入当前时间（`Asia/Shanghai`，含星期）。只写业务规则，措辞交给模型；结尾一句总则：像同事之间发消息，短句，说清结果就行，查得到就说，查不到就说没有记录。
 
 1. **身份**：BizSnap 商务助理；用户发截图、文字或两者；从里面读人和事，必要时查过往。
 2. **能做什么**：创建联系人、更新联系人、创建会议。
-3. **说话方式**：像同事汇报，不提界面 / 按钮 / 确认 / 卡片 / 流程状态；不叙述调用了什么工具、查的是库还是历史；不播报处理过程；整理好的东西还没真正写入时说「整理好了」「这样对吗」，不说「已保存」「已添加」；交代完就停。
-4. **内容**：只讲商务事实（谁、哪家公司、职位、时间、谁参加）；信息没齐先问（认识一个人至少要有姓名，约会议必须有开始时间，改资料要能对上是谁）；一次输入多件事分条说；截图与文字冲突时以用户写的字为准；出错用一句自然的话说明，不粘贴原始错误。
-5. **落成记录**：这一轮能定下来的必须真的调工具（`create_contact` / `update_contact` / `create_meeting`）；正文里说的每条记录都要有对应工具调用，一次调用只出一条；出错时按第 4 组说人话，不改口说「整理好了」；信息不够、正在追问的那一轮不提前建记录。
-6. **只处理商务**：生活闲聊、表情包、广告、代码截图直接回「未识别到商务信息」，不调工具。
-7. **查人优先**：涉及某人先 `search_contact`；需要更细履历再 `get_contact_history`；没找到人或只有模糊描述（「上次做跨境支付那个」）用 `search_interactions`；查到多人用一句话问清是哪一位；问「现在」的情况用 `when="now"`。
+3. **落成记录**：这一轮能定下来的调对应工具（`create_contact` / `update_contact` / `create_meeting`，一次调用一条）；信息不够先问一句（认识一个人至少要有姓名，约会议要有开始时间，改资料要对得上是谁）；正文说清这次要写入什么（建谁、改哪项、什么时间、谁参加）。
+4. **只处理商务**：生活闲聊、表情包、广告、代码截图回一句「未识别到商务信息」，不调工具。
+5. **查人**：涉及某人先 `search_contact`；要更细的履历再用 `get_contact_history`；查到多个人就问清是哪一位。
+6. **查往事**：只有一句模糊描述时用 `search_interactions`，从那句话里取实词。
+7. **清单与日程**：问「有哪些客户」「最近联系过谁」用 `list_contacts`；问「最近有什么会议」「这周见过谁」用 `list_interactions`（会议传 `kind="meeting"`）。
 8. **时间**：相对时间换算成带偏移 ISO 8601（如 `2026-11-04T15:00:00+08:00`）；没说结束时间按 1 小时。
-9. **字段连带过期**：换行业/换公司时旧的公司、职位、项目可能失效，先问一句再改；不自己删字段，不在一条消息里连问一串。
-10. **记忆**：查得到就说，查不到就说没有记录，不编造。
-11. 用中文，简洁具体，不用「我建议您」这类客套。
+9. **字段连带过期**：换行业或换公司时，旧的公司、职位、项目可能不再作数，先问一句再改，不默默沿用。
+
+不写界面文案规则、不写「不要提工具/卡片」这类措辞禁令：模型自己组织语言，需要控制的是回答的信息量，靠工具返回的字段粒度来控。
 
 ### 卡片的硬约束
 
@@ -318,6 +320,8 @@ export const bizAgent = new Agent({
 | `search_contact` | `query: string`、`when?: 'now' \| 'any'`（默认 any） | 三段检索（见第六节），返回 `{ query, when, total, inDevice, candidates: [{ id, name, now, timeline, matchedIn, inDevice }], note }`，最多 10 条；库里没有时 `note` 提示「可能是新联系人」 |
 | `search_interactions` | `keywords: string[]`（2~6 字实词）、`limit?`（默认 8） | 关键词再切 2-gram 补充，在 `background` / `meeting` 子串匹配，命中多的排前，返回事件原文（带 `contactName`）交模型判断 |
 | `get_contact_history` | `name: string`、`limit?`（默认 8） | 该人完整属性时间线 + 最近 N 条事件；找不到时返回 `{ found: false, message }` |
+| `list_contacts` | `days?`、`limit?`（默认 10） | 按最近往来倒序列出联系人，只返回姓名 / 公司 / 职位；要电话、关系、项目等细节交给 `search_contact` |
+| `list_interactions` | `kind?: created \| updated \| meeting \| any`（默认 any）、`days?`（默认 30）、`name?`、`limit?`（默认 10） | 按时间倒序列出事件，带谁、什么事、原因与会议信息；查会议用 `kind: 'meeting'` |
 | `create_contact` | `name`（必填）+ phone / email / industry / company / position / project / relation + `reason?` | 只返回 `{ draft }`；同名已存在时返回 `{ error }`，提示改用 `update_contact` |
 | `update_contact` | `target_name`（必填）+ 任意要改字段 + `reason?` | 只返回 `{ draft, current }`；目标不存在或字段全无变化时返回 `{ error }` |
 | `create_meeting` | `title` / `start_time`（必填，带偏移 ISO 8601）/ `end_time?` / `participants`（非空数组）/ `location?` / `remark?` / `reason?` | 只返回 `{ draft }`；时间格式非法或结束早于开始时返回 `{ error }`；省略结束时间按 60 分钟补齐 |
@@ -394,11 +398,13 @@ export const bizAgent = new Agent({
 | `search_contact` | 查联系人 |
 | `search_interactions` | 查往来记录 |
 | `get_contact_history` | 查履历 |
+| `list_contacts` | 列联系人 |
+| `list_interactions` | 列往来 |
 | `create_contact` | 整理联系人 |
 | `update_contact` | 整理资料更新 |
 | `create_meeting` | 安排会议 |
 
-`detail` 从入参里按 `query` → `target_name` → `name` → `title` 顺序取第一个非空值（截断 40 字）。`snapshot()` 落库前过滤掉纯空白思考段。
+`detail` 从入参里按 `query` → `target_name` → `name` → `title` 顺序取第一个非空值（截断 40 字）；列事件时按 `kind` 显示「会议 / 新建 / 更新 / 全部」。`snapshot()` 落库前过滤掉纯空白思考段。
 
 ## 十一、洞察生成
 

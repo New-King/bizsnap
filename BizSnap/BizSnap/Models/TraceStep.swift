@@ -20,6 +20,8 @@ struct ToolTrace: Codable, Hashable, Identifiable {
         case "search_contact": return "magnifyingglass"
         case "search_interactions": return "text.magnifyingglass"
         case "get_contact_history": return "clock.arrow.circlepath"
+        case "list_contacts": return "person.2"
+        case "list_interactions": return "list.bullet.rectangle"
         case "create_contact": return "person.badge.plus"
         case "update_contact": return "pencil.line"
         case "create_meeting": return "calendar.badge.plus"
