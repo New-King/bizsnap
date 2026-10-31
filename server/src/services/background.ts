@@ -4,12 +4,10 @@ import type { CardDraft } from '../types.js';
 
 export type ChatLine = { role: string; text: string };
 
-const RULES = `写 1 到 2 句中文，说清这条记录为什么存在：
-- 先说起因：对话里说了什么、发生了什么事
-- 再说这次要落地成什么
-- 只用对话里出现的信息，不推测、不补全
-- 不出现「用户」「模型」「输入」这类词，直接写事情本身
-- 不用「已保存」「已记录」这类说法`;
+const RULES = `写法：一句「用户说「原话片段」」，用户只是补充某个信息时就写「用户补充「原话片段」」；内容来自截图时写「截图里说「原话片段」」。
+- 引号里必须是对话中出现过的原话，不改写、不概括
+- 需要时说清这次落成什么，最多再加半句，例如「用户说「下周三下午三点约他聊聊二期验收」，记成会议」
+- 不写分析、不解释、不出现「对话」「记录」「模型」这类词`;
 
 function renderCard(card: CardDraft): string {
   const payload = card.payload as Record<string, unknown>;
