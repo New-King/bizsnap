@@ -3,6 +3,9 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+/// 滚动到底用的恒定锚点：不能挂在流式气泡上（它一收尾就消失，scrollTo 会落空）
+private let scrollBottomAnchor = "scroll-bottom-anchor"
+
 struct ChatView: View {
     let thread: ThreadSummary
 
@@ -32,6 +35,8 @@ struct ChatView: View {
     /// 光标只在「正在吐字」时亮：停止吐字 450ms 自动熄，不留一根静止的蓝条
     @State private var caretOn = false
     @State private var caretTask: Task<Void, Never>?
+    /// 贴底的延时任务：内容二次变高时要能取消上一轮，避免多次滚动互相打断
+    @State private var scrollTask: Task<Void, Never>?
     /// 本轮是否已经收尾：收尾后不再显示等待中的三点，避免卡片出来又闪一下
     @State private var turnDone = true
     @State private var errorText: String?
@@ -72,56 +77,63 @@ struct ChatView: View {
 
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 12) {
-                            if messages.isEmpty && !sending {
-                                emptyHint
-                            }
+                        // 锚点放在 lazy 栈外面：滚动目标必须始终存在，否则收尾那一刻 scrollTo 会落空
+                        VStack(spacing: 0) {
+                            LazyVStack(spacing: 12) {
+                                if messages.isEmpty && !sending {
+                                    emptyHint
+                                }
 
-                            ForEach(messages) { message in
-                                messageView(message)
-                                    .id(message.id)
-                                    // 只用淡入：位移会让已经读到的正文跟着往上跳
-                                    .transition(.opacity)
-                            }
+                                ForEach(messages) { message in
+                                    messageView(message)
+                                        .id(message.id)
+                                        // 只用淡入：位移会让已经读到的正文跟着往上跳
+                                        .transition(.opacity)
+                                }
 
-                            // 等待首字（发消息 / 确认后生成洞察）与正在吐字，都显示这条气泡
-                            if !streamingText.isEmpty || ((sending || confirming) && !turnDone) {
-                                streamingBubble
-                            }
+                                // 等待首字（发消息 / 确认后生成洞察）与正在吐字，都显示这条气泡
+                                if !streamingText.isEmpty || ((sending || confirming) && !turnDone) {
+                                    streamingBubble
+                                }
 
-                            if let errorText {
-                                ErrorBar(text: errorText) {
-                                    Task { await retryLast() }
+                                if let errorText {
+                                    ErrorBar(text: errorText) {
+                                        Task { await retryLast() }
+                                    }
                                 }
                             }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 12)
+                            .padding(.bottom, 16)
+
+                            Color.clear.frame(height: 1).id(scrollBottomAnchor)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .padding(.bottom, 16)
                     }
+                    // 打开会话先停在最新一条（带卡片的那条），不用手动往下拖
+                    .defaultScrollAnchor(.bottom)
                     // 拖动立刻收键盘；点空白处也收，但不抢消息里的点击
                     .scrollDismissesKeyboard(.immediately)
                     .simultaneousGesture(TapGesture().onEnded { hideKeyboard() })
-                    .onChange(of: messages.count) { _, _ in
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(messages.last?.id, anchor: .bottom)
-                        }
-                    }
+                    // 一轮结束才是卡片真正落位的时候：消息变多、卡片冒出、确认条出现都会让内容变高，
+                    // 逐字滚动那一下跟不上，统一交给 pinToBottom 在动画收尾时补位
+                    .onChange(of: messages.count) { _, _ in pinToBottom(proxy) }
                     .onChange(of: sending) { _, isSending in
                         guard isSending else { return }
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("stream-end", anchor: .bottom)
-                        }
+                        pinToBottom(proxy)
                     }
                     // 确认后生成洞察也会先等一会儿：等待气泡出现时要跟到底部
                     .onChange(of: confirming) { _, isConfirming in
                         guard isConfirming else { return }
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("stream-end", anchor: .bottom)
-                        }
+                        pinToBottom(proxy)
                     }
+                    // 卡片随工具返回一张张冒出来：每来一张都贴底，别让最后一张停在屏幕外
+                    .onChange(of: streamingCards.count) { _, _ in pinToBottom(proxy) }
+                    // 确认条出现 / 收起会把气泡区压矮，同样要重新贴底，否则最后一张卡被切一半
+                    .onChange(of: pickedCards.count) { _, _ in pinToBottom(proxy) }
+                    .onChange(of: errorText) { _, _ in pinToBottom(proxy) }
                     .onChange(of: streamingText) { _, _ in
-                        proxy.scrollTo("stream-end", anchor: .bottom)
+                        // 逐字跟手，不要动画，否则长回复会一路追着抖
+                        proxy.scrollTo(scrollBottomAnchor, anchor: .bottom)
                     }
                 }
 
@@ -138,6 +150,8 @@ struct ChatView: View {
                     onCamera: { showCamera = true }
                 )
             }
+            // 确认条从底部升起，气泡区同时让位：先贴底再长出按钮，不让它平白压住最后一张卡
+            .animation(.easeOut(duration: 0.22), value: pickedCards.count)
         }
         .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { _, item in
@@ -358,7 +372,23 @@ struct ChatView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .id("stream-end")
+    }
+
+    /// 统一的贴底动作：立刻滚一次，再在卡片浮现动画（0.34s + 序号延迟）收尾时补一次。
+    /// 一次滚动只能按当下的内容高度算位置，卡片和确认条往往在那一刻之后才真正占位。
+    private func pinToBottom(_ proxy: ScrollViewProxy, delays: [Int] = [0, 200, 620]) {
+        scrollTask?.cancel()
+        scrollTask = Task { @MainActor in
+            for delay in delays {
+                if delay > 0 {
+                    try? await Task.sleep(for: .milliseconds(delay))
+                }
+                if Task.isCancelled { return }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(scrollBottomAnchor, anchor: .bottom)
+                }
+            }
+        }
     }
 
     private var confirmBar: some View {
