@@ -195,12 +195,12 @@ struct ChatView: View {
         }
         .alert("需要日历权限", isPresented: $showCalendarPrimer) {
             Button("稍后", role: .cancel) {
-                beginConfirm(pickedCards)
+                Task { await performConfirm() }
             }
             Button("允许") {
                 Task {
                     _ = await CalendarService.shared.requestAccess()
-                    beginConfirm(pickedCards)
+                    await performConfirm()
                 }
             }
         } message: {
@@ -396,13 +396,12 @@ struct ChatView: View {
     }
 
     private var confirmBar: some View {
-        // 动作直连：不在点击与置位之间夹一层 Task，否则按钮会「先原样停一帧再变 loading」
-        Button(action: startConfirm) {
+        Button {
+            Task { await confirmSelected() }
+        } label: {
             HStack(spacing: 8) {
                 if confirming {
                     ProgressView().tint(.white)
-                    Text("正在确认…")
-                        .font(.system(size: 15, weight: .semibold))
                 } else {
                     Image(systemName: "checkmark.circle.fill")
                     Text("确认选中 \(pickedCards.count) 项")
@@ -590,9 +589,7 @@ struct ChatView: View {
         }
     }
 
-    /// 点「确认选中」：先同步置位（这一帧按钮就变成 loading），再决定是弹权限还是直接发请求
-    private func startConfirm() {
-        guard !confirming else { return }
+    private func confirmSelected() async {
         let cards = pickedCards
         guard !cards.isEmpty else { return }
 
@@ -601,20 +598,17 @@ struct ChatView: View {
             showCalendarPrimer = true
             return
         }
-        beginConfirm(cards)
+        await performConfirm()
     }
 
-    /// 状态在这里一次改完，网络放到 Task 里跑：点下去就有反馈，不等调度
-    private func beginConfirm(_ cards: [ActionCard]) {
-        guard !cards.isEmpty, !confirming else { return }
+    private func performConfirm() async {
+        let cards = pickedCards
+        guard !cards.isEmpty else { return }
         confirming = true
         streamingText = ""
         errorText = nil
         turnDone = false
-        Task { await runConfirm(cards) }
-    }
 
-    private func runConfirm(_ cards: [ActionCard]) async {
         do {
             try await client.confirmStreaming(threadId: threadId, cards: cards) { event in
                 apply(event, context: .confirm)
