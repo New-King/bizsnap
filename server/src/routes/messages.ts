@@ -158,13 +158,16 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
       cards: cards.length ? cards : undefined,
     });
 
-    // 首轮结束后用模型起一个短标题；失败不影响这一轮
-    let finalTitle = thread.title;
-    if (!finalTitle.trim()) {
-      finalTitle = await generateTitle(text, replyText).catch(() => '');
-      if (finalTitle) await updateThread(threadId, { title: finalTitle });
-    }
+    // 先发 done：卡片随它一起落位。标题要再调一次模型，别挡在它前面
+    send({ type: 'done', message, title: thread.title || undefined });
 
-    send({ type: 'done', message, title: finalTitle || undefined });
+    // 首轮补标题：done 之后再生成，单独一帧回给前端；失败不影响这一轮
+    if (!thread.title.trim()) {
+      const generated = await generateTitle(text, replyText).catch(() => '');
+      if (generated) {
+        await updateThread(threadId, { title: generated });
+        send({ type: 'title', title: generated });
+      }
+    }
   });
 });

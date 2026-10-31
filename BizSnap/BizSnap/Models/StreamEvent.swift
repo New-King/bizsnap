@@ -7,6 +7,8 @@ enum StreamEvent {
     case card(ActionCard)
     case written([WrittenCard], contactName: String)
     case done(message: ChatMessage?, insight: String?, contactName: String, title: String?)
+    /// done 之后单独补的会话标题：标题要再调一次模型，不挡在这条流前面
+    case title(String)
     case failed(String)
 }
 
@@ -42,6 +44,9 @@ struct RawStreamEvent: Decodable {
                 contactName: contactName ?? "",
                 title: title
             )
+        case "title":
+            guard let title, !title.isEmpty else { return nil }
+            return .title(title)
         case "error":
             return .failed(error ?? "服务端错误")
         default:

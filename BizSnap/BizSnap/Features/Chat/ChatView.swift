@@ -78,13 +78,8 @@ struct ChatView: View {
                             ForEach(messages) { message in
                                 messageView(message)
                                     .id(message.id)
-                                    // 新消息（含刚到的卡片）淡入并轻轻上推，不硬切
-                                    .transition(
-                                        .asymmetric(
-                                            insertion: .opacity.combined(with: .move(edge: .bottom)),
-                                            removal: .opacity
-                                        )
-                                    )
+                                    // 只用淡入：位移会让已经读到的正文跟着往上跳
+                                    .transition(.opacity)
                             }
 
                             if sending || !streamingText.isEmpty {
@@ -258,7 +253,7 @@ struct ChatView: View {
             }
 
             if let cards = message.cards {
-                ForEach(cards) { card in
+                ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
                     CardStrip(
                         card: card,
                         selectable: isSelectable(card),
@@ -269,6 +264,8 @@ struct ChatView: View {
                         onRetry: { Task { await retryLocal(card) } },
                         onOpenSettings: { openSettings() }
                     )
+                    // 正文先落位，卡片按顺序淡淡浮出，不跟文字一起整体上移
+                    .modifier(CardReveal(index: index))
                 }
             }
         }
@@ -618,8 +615,8 @@ struct ChatView: View {
         case .done(let message, let insight, _, let newTitle):
             caretTask?.cancel()
             caretOn = false
-            // 换正式消息用「过阻尼」弹簧：咬死、不回弹，卡片不会凭空蹦出来
-            withAnimation(.interpolatingSpring(stiffness: 1200, damping: 80)) {
+            // 换正式消息：正文原地淡入，卡片在 MessageRow 里逐个浮现
+            withAnimation(.easeOut(duration: 0.3)) {
                 switch context {
                 case .turn:
                     if let message { messages.append(message) }
@@ -635,6 +632,11 @@ struct ChatView: View {
                 streamingText = ""
                 streamingCards = []
             }
+
+        case .title(let value):
+            // done 之后补的标题：卡片已经出来了，这里只更新标题栏
+            title = value
+            onTitleChanged(value)
 
         case .failed(let message):
             errorText = message
@@ -727,4 +729,21 @@ struct ChatView: View {
 struct ImagePreviewItem: Identifiable {
     let id = UUID()
     let image: UIImage
+}
+
+/// 卡片逐个浮现：正文先落位，按钮再按顺序淡淡出来，不跟文字一起整体上移
+private struct CardReveal: ViewModifier {
+    let index: Int
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown ? 0 : 8)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.34).delay(Double(index) * 0.08)) {
+                    shown = true
+                }
+            }
+    }
 }
