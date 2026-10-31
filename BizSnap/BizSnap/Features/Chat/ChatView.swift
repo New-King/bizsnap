@@ -504,8 +504,10 @@ struct ChatView: View {
                 switch event {
                 case .text(let delta):
                     streamingText += delta
-                case .card(let card):
-                    streamingCards.append(card)
+                case .card:
+                    // 卡片不在流式阶段渲染：模型先调工具后写字，卡片必然先到，
+                    // 放出去就是「按钮先于文字」。等 done 的正式消息一起显示
+                    break
                 case .done(let message, _, _, let newTitle):
                     if let message { messages.append(message) }
                     if let newTitle, !newTitle.isEmpty {

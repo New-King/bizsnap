@@ -147,6 +147,10 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
     const replyText =
       reply.trim() || (cards.length ? '整理好了，看一眼对不对。' : '没有识别到可记录的信息。');
 
+    // 模型只调了工具、没写字：把兜底文案当成一次正文补发。
+    // 前端规定「先正文、后卡片」，缺了这条正文，卡片会一直压着不显示。
+    if (!reply.trim()) send({ type: 'text', delta: replyText });
+
     const message = await insertMessage(threadId, {
       id: assistantId,
       role: 'assistant',
