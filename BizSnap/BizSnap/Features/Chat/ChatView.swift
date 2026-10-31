@@ -49,7 +49,6 @@ struct ChatView: View {
     @State private var title = ""
     @State private var photoItem: PhotosPickerItem?
     @State private var showPhotoPicker = false
-    @State private var showCamera = false
     @State private var preview: ImagePreviewItem?
     @State private var lastFailed: (text: String, imageBase64: String?)?
     @State private var showRename = false
@@ -156,8 +155,7 @@ struct ChatView: View {
                     image: $image,
                     sending: sending,
                     onSend: { Task { await sendMessage() } },
-                    onPickPhoto: { showPhotoPicker = true },
-                    onCamera: { showCamera = true }
+                    onPickPhoto: { showPhotoPicker = true }
                 )
             }
             // 确认条从底部升起，气泡区同时让位：先贴底再长出按钮，不让它平白压住最后一张卡
@@ -172,11 +170,6 @@ struct ChatView: View {
                     image = picked
                 }
                 photoItem = nil
-            }
-        }
-        .sheet(isPresented: $showCamera) {
-            CameraPicker { picked in
-                image = picked
             }
         }
         .fullScreenCover(item: $preview) { item in

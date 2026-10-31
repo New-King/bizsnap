@@ -111,7 +111,7 @@ bizsnap/
 │       ├── App/RootView.swift
 │       ├── Models/{DTO,ActionCard,ChatMessage,StreamEvent,TraceStep}.swift
 │       ├── Services/{AgentClient,SSEParser,ImageCompressor,ContactsService,CalendarService,CardExecutor}.swift
-│       ├── Features/Chat/{ChatView,MessageBubble,CardStrip,Composer,ErrorBar,AgentFeedback,AgentTraceView,CameraPicker}.swift
+│       ├── Features/Chat/{ChatView,MessageBubble,CardStrip,Composer,ErrorBar,AgentFeedback,AgentTraceView}.swift
 │       ├── Features/ThreadList/ThreadDrawer.swift
 │       ├── Features/Settings/SettingsView.swift
 │       └── Theme/Tokens.swift
@@ -446,7 +446,7 @@ iOS 17.0、`PRODUCT_BUNDLE_IDENTIFIER = com.newking.bizsnap`、竖屏、`Info.pl
 - 消息流：气泡 + 卡片，`AgentTraceView` 在气泡上方
 - 空态：一句轻提示「把一段商务对话，变成通讯录里的一条记录」
 - 流式气泡：首字之前显示竖条 loading（`TypingBars`：5 根 3×15 胶囊，`scaleEffect(y:)` 在 1 ↔ 0.3 之间，每根延迟 0.1s、0.45s 一次往返，颜色 `textSecondary`）；首字到达后换成真实气泡 + 光标
-- 输入栏（`Composer`）：左「+」开相册/拍照，中间输入框，右侧发送；选图后上方显示缩略图与「×」
+- 输入栏（`Composer`）：左侧图片按钮直接打开相册（不弹二级菜单），中间输入框，右侧发送；选图后上方显示缩略图与「×」
 - 卡片全部收在消息里，不单独成区
 
 **会话列表（抽屉）**：每行首字头像 + 标题 + 最后一句摘要 + 时间；顶部「BizSnap」+ 新建按钮；行左滑删除、长按改名。

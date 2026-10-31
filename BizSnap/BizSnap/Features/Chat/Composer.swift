@@ -6,7 +6,6 @@ struct Composer: View {
     let sending: Bool
     let onSend: () -> Void
     let onPickPhoto: () -> Void
-    let onCamera: () -> Void
 
     @FocusState private var focused: Bool
 
@@ -56,25 +55,14 @@ struct Composer: View {
 
             // 整条输入栏是一个容器：左图标、中文本、右发送，不再拆成三个方块
             HStack(alignment: .bottom, spacing: 4) {
-                Menu {
-                    Button {
-                        onPickPhoto()
-                    } label: {
-                        Label("从相册选", systemImage: "photo")
-                    }
-                    Button {
-                        onCamera()
-                    } label: {
-                        Label("拍一张", systemImage: "camera")
-                    }
-                } label: {
-                    Image(systemName: "camera")
+                Button(action: onPickPhoto) {
+                    Image(systemName: "photo.on.rectangle")
                         .font(.system(size: 19, weight: .regular))
                         .foregroundStyle(Theme.textSecondary)
                         .frame(width: 38, height: 38)
                         .contentShape(Rectangle())
                 }
-                .accessibilityLabel("添加截图")
+                .accessibilityLabel("从相册选截图")
 
                 TextField("说点什么，或贴一张聊天截图", text: $text, axis: .vertical)
                     .lineLimit(1...4)
