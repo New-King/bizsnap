@@ -16,6 +16,7 @@ import { notFound, parse, readJson } from '../http.js';
 import { bizAgent } from '../mastra/agent.js';
 import { buildPrompt } from '../mastra/prompt.js';
 import { generateTitle } from '../mastra/title.js';
+import { TraceRecorder } from '../services/trace.js';
 import { sseResponse } from '../sse.js';
 import type { CardDraft } from '../types.js';
 
@@ -103,6 +104,8 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
 
     let reply = '';
     const cards: CardDraft[] = [];
+    // 这一轮模型做了什么：思考与工具调用都记下来，随消息落库
+    const trace = new TraceRecorder();
 
     try {
       const stream = await bizAgent.stream(
@@ -128,12 +131,62 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
           continue;
         }
 
+        // 思考逐字推：界面按 delta 往后接，不用每帧重发整段
+        if (chunk.type === 'reasoning-delta') {
+          const delta = chunk.payload?.text ?? '';
+          if (delta) {
+            trace.reasoning(delta);
+            send({ type: 'reasoning', delta });
+          }
+          continue;
+        }
+
+        // 工具一开调就上链路：先显示「在查什么」，结果回来再改状态
+        if (chunk.type === 'tool-call') {
+          const payload = chunk.payload as {
+            toolCallId: string;
+            toolName: string;
+            args?: unknown;
+          };
+          send({ type: 'tool', step: trace.toolCall(payload) });
+          continue;
+        }
+
         // 草案不等整段文字结束：工具一返回就推给前端
         if (chunk.type === 'tool-result') {
-          const payload = chunk.payload as { toolName?: string; result?: { draft?: CardDraft } };
+          const payload = chunk.payload as {
+            toolCallId?: string;
+            toolName?: string;
+            result?: { draft?: CardDraft };
+            isError?: boolean;
+          };
+          if (payload.toolCallId) {
+            send({
+              type: 'tool',
+              step: trace.toolResult(
+                { toolCallId: payload.toolCallId, isError: payload.isError },
+                payload.toolName,
+              ),
+            });
+          }
           if (payload.toolName && DRAFT_TOOLS.has(payload.toolName) && payload.result?.draft) {
             cards.push(payload.result.draft);
             send({ type: 'card', card: payload.result.draft });
+          }
+          continue;
+        }
+
+        // 工具本身抛错：链路里标红，正文由模型自己交代
+        if (chunk.type === 'tool-error') {
+          const payload = chunk.payload as {
+            toolCallId?: string;
+            toolName?: string;
+          };
+          if (payload.toolCallId) {
+            send({
+              type: 'tool',
+              step: trace.toolResult({ toolCallId: payload.toolCallId, isError: true }, payload.toolName),
+            });
           }
         }
       }
@@ -161,6 +214,7 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
       role: 'assistant',
       text: replyText,
       cards: cards.length ? cards : undefined,
+      trace: trace.snapshot(),
     });
 
     // 先发 done：卡片随它一起落位。标题要再调一次模型，别挡在它前面

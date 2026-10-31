@@ -1,8 +1,12 @@
 import Foundation
 
-/// 服务端 SSE 的 5 种帧，客户端只认 `data:` 行里的 `type`
+/// 服务端 SSE 的各种帧，客户端只认 `data:` 行里的 `type`
 enum StreamEvent {
     case started(messageId: String)
+    /// 模型思考的增量：界面往后接，不要整段重发
+    case reasoning(String)
+    /// 工具调用的一步：新调用或结果回填，按 id 就地对齐
+    case tool(ToolTrace)
     case text(String)
     case card(ActionCard)
     case written([WrittenCard], contactName: String)
@@ -16,6 +20,8 @@ enum StreamEvent {
 struct RawStreamEvent: Decodable {
     let type: String
     let delta: String?
+    /// 工具调用的一步（type == "tool"）
+    let step: ToolTrace?
     let card: ActionCard?
     let message: ChatMessage?
     let written: [WrittenCard]?
@@ -30,6 +36,11 @@ struct RawStreamEvent: Decodable {
         switch type {
         case "start":
             return .started(messageId: messageId ?? "")
+        case "reasoning":
+            guard let delta, !delta.isEmpty else { return nil }
+            return .reasoning(delta)
+        case "tool":
+            return step.map { .tool($0) }
         case "text":
             guard let delta, !delta.isEmpty else { return nil }
             return .text(delta)

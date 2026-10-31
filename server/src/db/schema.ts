@@ -48,6 +48,7 @@ export async function ensureSchema(): Promise<void> {
         text TEXT NOT NULL DEFAULT '',
         image_base64 TEXT,
         cards TEXT,
+        trace TEXT,
         created_at TEXT NOT NULL
       )`,
       `CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, created_at)`,
@@ -59,4 +60,14 @@ export async function ensureSchema(): Promise<void> {
     ],
     'write',
   );
+  // 老库补列：SQLite 没有 ADD COLUMN IF NOT EXISTS，只能先查 pragma
+  await ensureColumn('messages', 'trace', 'TEXT');
+}
+
+async function ensureColumn(table: string, column: string, ddl: string): Promise<void> {
+  const { rows } = await db.execute(`PRAGMA table_info(${table})`);
+  const exists = rows.some((row) => String(row.name) === column);
+  if (!exists) {
+    await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  }
 }

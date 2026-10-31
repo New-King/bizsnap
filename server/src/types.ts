@@ -90,12 +90,32 @@ export type CardDraft = {
   payload: CreateContactPayload | UpdateContactPayload | CreateMeetingPayload;
 };
 
+/**
+ * 一轮里模型做了什么，按发生顺序排列：思考片段 / 一次工具调用。
+ * 只用于界面展示（链路感），不参与业务判断。
+ */
+export type TraceStep =
+  | { kind: 'reasoning'; text: string }
+  | {
+      kind: 'tool';
+      /** 与模型侧 toolCallId 一致，结果回来时按它找回这一步 */
+      id: string;
+      tool: string;
+      /** 中文短标签，如「查联系人」 */
+      label: string;
+      /** 这次调用的关键入参，如人名、会议标题 */
+      detail?: string;
+      status: 'running' | 'ok' | 'error';
+    };
+
 export type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
   text?: string;
   imageBase64?: string;
   cards?: CardDraft[];
+  /** 这一轮的思考与工具链路；老消息没有这个字段 */
+  trace?: TraceStep[];
   createdAt: string;
 };
 

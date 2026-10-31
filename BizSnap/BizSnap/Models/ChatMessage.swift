@@ -17,6 +17,8 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var text: String?
     var imageBase64: String?
     var cards: [ActionCard]?
+    /// 这一轮的思考与工具链路；老消息没有
+    var trace: [TraceStep]?
     let createdAt: String
 
     var isUser: Bool { role == .user }
@@ -29,6 +31,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
             text: text,
             imageBase64: nil,
             cards: nil,
+            trace: nil,
             createdAt: ISO8601DateFormatter().string(from: Date())
         )
     }
@@ -40,6 +43,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
             text: text.isEmpty ? nil : text,
             imageBase64: imageBase64,
             cards: nil,
+            trace: nil,
             createdAt: ISO8601DateFormatter().string(from: Date())
         )
     }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { CardDraft, ChatMessage, ThreadSummary } from '../types.js';
+import type { CardDraft, ChatMessage, ThreadSummary, TraceStep } from '../types.js';
 import { db } from './client.js';
 
 type Row = Record<string, unknown>;
@@ -73,7 +73,7 @@ export async function insertMessage(
 ): Promise<ChatMessage> {
   const createdAt = message.createdAt ?? new Date().toISOString();
   await db.execute({
-    sql: 'INSERT INTO messages (id, thread_id, role, text, image_base64, cards, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    sql: 'INSERT INTO messages (id, thread_id, role, text, image_base64, cards, trace, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     args: [
       message.id,
       threadId,
@@ -81,6 +81,7 @@ export async function insertMessage(
       message.text ?? '',
       message.imageBase64 ?? null,
       message.cards ? JSON.stringify(message.cards) : null,
+      message.trace?.length ? JSON.stringify(message.trace) : null,
       createdAt,
     ],
   });
@@ -102,6 +103,7 @@ export async function listMessages(threadId: string): Promise<ChatMessage[]> {
     text: str(row.text) || undefined,
     imageBase64: (row.image_base64 as string | null) ?? undefined,
     cards: row.cards ? (JSON.parse(str(row.cards)) as CardDraft[]) : undefined,
+    trace: row.trace ? (JSON.parse(str(row.trace)) as TraceStep[]) : undefined,
     createdAt: str(row.created_at),
   }));
 }

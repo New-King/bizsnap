@@ -32,6 +32,8 @@ struct ChatView: View {
     /// 流式中的正文与卡片：done 到达后整段换成落库的消息
     @State private var streamingText = ""
     @State private var streamingCards: [ActionCard] = []
+    /// 本轮已经发生的思考与工具调用：随流长出来，done 之后由正式消息接管
+    @State private var streamingTrace: [TraceStep] = []
     /// 光标只在「正在吐字」时亮：停止吐字 450ms 自动熄，不留一根静止的蓝条
     @State private var caretOn = false
     @State private var caretTask: Task<Void, Never>?
@@ -137,6 +139,10 @@ struct ChatView: View {
                     .onChange(of: errorText) { _, _ in pinToBottom(proxy) }
                     .onChange(of: streamingText) { _, _ in
                         // 逐字跟手，不要动画，否则长回复会一路追着抖
+                        proxy.scrollTo(scrollBottomAnchor, anchor: .bottom)
+                    }
+                    // 链路比正文先长出来：多一行就贴一次底，别让「正在查…」停在屏幕外
+                    .onChange(of: streamingTrace.count) { _, _ in
                         proxy.scrollTo(scrollBottomAnchor, anchor: .bottom)
                     }
                 }
@@ -276,6 +282,11 @@ struct ChatView: View {
     @ViewBuilder
     private func messageView(_ message: ChatMessage) -> some View {
         VStack(alignment: message.isUser ? .trailing : .leading, spacing: 8) {
+            // 链路在正文上方：先看到「查了谁、做了什么」，再读结论
+            if let trace = message.trace, !trace.isEmpty {
+                AgentTraceView(steps: trace)
+            }
+
             MessageBubble(message: message) { picked in
                 preview = ImagePreviewItem(image: picked)
             }
@@ -335,6 +346,11 @@ struct ChatView: View {
     @ViewBuilder
     private var streamingBubble: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // 链路边跑边长：先出现「在查谁」，字还没来也有东西可看
+            if !streamingTrace.isEmpty {
+                AgentTraceView(steps: streamingTrace)
+            }
+
             if streamingText.isEmpty && streamingCards.isEmpty {
                 skeleton
             } else {
@@ -551,6 +567,7 @@ struct ChatView: View {
         sending = true
         streamingText = ""
         streamingCards = []
+        streamingTrace = []
         errorText = nil
         turnDone = false
         var streamFailed = false
@@ -577,6 +594,7 @@ struct ChatView: View {
         sending = false
         streamingText = ""
         streamingCards = []
+        streamingTrace = []
     }
 
     private func reloadMessages() async {
@@ -606,6 +624,7 @@ struct ChatView: View {
         guard !cards.isEmpty else { return }
         confirming = true
         streamingText = ""
+        streamingTrace = []
         errorText = nil
         turnDone = false
 
@@ -622,6 +641,7 @@ struct ChatView: View {
 
         confirming = false
         streamingText = ""
+        streamingTrace = []
     }
 
     // MARK: - 流的统一落点
@@ -631,6 +651,25 @@ struct ChatView: View {
         switch event {
         case .started:
             break
+
+        // 思考逐字来：接在当前这段后面；中间隔了工具调用就另起一段
+        case .reasoning(let delta):
+            if let last = streamingTrace.last, case .reasoning(let text) = last {
+                streamingTrace[streamingTrace.count - 1] = .reasoning(text + delta)
+            } else {
+                streamingTrace.append(.reasoning(delta))
+            }
+
+        // 工具调用：同一个 toolCallId 就地改状态（running → ok / error），不新起一行
+        case .tool(let step):
+            if let index = streamingTrace.firstIndex(where: { element in
+                if case .tool(let existing) = element { return existing.id == step.id }
+                return false
+            }) {
+                streamingTrace[index] = .tool(step)
+            } else {
+                streamingTrace.append(.tool(step))
+            }
 
         case .text(let delta):
             streamingText += delta
@@ -679,6 +718,7 @@ struct ChatView: View {
                 // 同一轮更新里清空，避免正式消息和流式气泡同时出现
                 streamingText = ""
                 streamingCards = []
+                streamingTrace = []
             }
 
         case .title(let value):
