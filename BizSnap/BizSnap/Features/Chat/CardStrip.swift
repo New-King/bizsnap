@@ -87,7 +87,8 @@ struct CardStrip: View {
                 withAnimation(.easeOut(duration: 0.18)) { pulse = false }
                 return
             }
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.7)) { pulse = true }
+            // 欠阻尼：勾选时轻轻弹一下，不是硬缩放
+            withAnimation(.interpolatingSpring(stiffness: 380, damping: 18)) { pulse = true }
         }
     }
 

@@ -122,6 +122,16 @@ struct Composer: View {
             .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .onTapGesture { focused = true }
             .composerBackground()
+            // 聚焦不加 outline：内 1px 亮环 + 外 3px 淡环，做出「咬合」的层次
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .strokeBorder(Theme.accent.opacity(focused ? 0.35 : 0), lineWidth: 1)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Theme.accent.opacity(focused ? 0.10 : 0), lineWidth: 3)
+            )
+            .animation(.easeOut(duration: 0.18), value: focused)
             .padding(.horizontal, 14)
             .padding(.top, 6)
         }

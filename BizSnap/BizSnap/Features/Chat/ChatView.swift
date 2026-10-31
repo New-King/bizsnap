@@ -29,6 +29,9 @@ struct ChatView: View {
     /// 流式中的正文与卡片：done 到达后整段换成落库的消息
     @State private var streamingText = ""
     @State private var streamingCards: [ActionCard] = []
+    /// 光标只在「正在吐字」时亮：停止吐字 450ms 自动熄，不留一根静止的蓝条
+    @State private var caretOn = false
+    @State private var caretTask: Task<Void, Never>?
     @State private var errorText: String?
     @State private var localErrors: [String: CardFailure] = [:]
     /// 真的写进系统的卡片；服务端 confirmed 只是业务库已落库
@@ -75,6 +78,13 @@ struct ChatView: View {
                             ForEach(messages) { message in
                                 messageView(message)
                                     .id(message.id)
+                                    // 新消息（含刚到的卡片）淡入并轻轻上推，不硬切
+                                    .transition(
+                                        .asymmetric(
+                                            insertion: .opacity.combined(with: .move(edge: .bottom)),
+                                            removal: .opacity
+                                        )
+                                    )
                             }
 
                             if sending || !streamingText.isEmpty {
@@ -310,10 +320,14 @@ struct ChatView: View {
                             .font(.system(size: 15))
                             .foregroundStyle(Theme.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Rectangle()
-                            .fill(Theme.accentSoft)
-                            .frame(width: 2, height: 15)
+                        if caretOn {
+                            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                                .fill(Theme.accentSoft)
+                                .frame(width: 2, height: 16)
+                                .transition(.opacity)
+                        }
                     }
+                    .animation(.easeOut(duration: 0.16), value: caretOn)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 11)
                     .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.surface))
@@ -352,6 +366,7 @@ struct ChatView: View {
                     Image(systemName: "checkmark.circle.fill")
                     Text("确认选中 \(pickedCards.count) 项")
                         .font(.system(size: 15, weight: .semibold))
+                        .monospacedDigit()
                 }
             }
             .foregroundStyle(.white)
@@ -575,6 +590,7 @@ struct ChatView: View {
 
         case .text(let delta):
             streamingText += delta
+            pulseCaret()
 
         case .card:
             // 卡片不在流式阶段渲染：模型先调工具后写字，卡片必然先到，
@@ -583,37 +599,57 @@ struct ChatView: View {
 
         case .written(let written, _):
             guard context == .confirm else { return }
-            // 事务已提交：先把卡片折叠掉，再去写系统通讯录 / 日历
             let okIds = Set(written.filter(\.ok).map(\.cardId))
-            markConfirmed(okIds)
+            // 先取要写系统的那批卡，再折叠：折叠会把卡片标成已确认，
+            // 之后 pickedCards 就取不到了（会变成「已确认，未写入」还得手点写入）
+            let targets = pickedCards.filter { okIds.contains($0.id) }
+            // 折叠同样用过阻尼：从整条卡收成一行，不能有回弹
+            withAnimation(.interpolatingSpring(stiffness: 1200, damping: 80)) {
+                markConfirmed(okIds)
+            }
             for item in written where !item.ok {
                 localErrors[item.cardId] = CardFailure(
                     message: item.error ?? "写入失败",
                     needsSettings: false
                 )
             }
-            let targets = pickedCards.filter { okIds.contains($0.id) }
             Task { await writeToSystem(targets) }
 
         case .done(let message, let insight, _, let newTitle):
-            switch context {
-            case .turn:
-                if let message { messages.append(message) }
-                if let newTitle, !newTitle.isEmpty {
-                    title = newTitle
-                    onTitleChanged(newTitle)
+            caretTask?.cancel()
+            caretOn = false
+            // 换正式消息用「过阻尼」弹簧：咬死、不回弹，卡片不会凭空蹦出来
+            withAnimation(.interpolatingSpring(stiffness: 1200, damping: 80)) {
+                switch context {
+                case .turn:
+                    if let message { messages.append(message) }
+                    if let newTitle, !newTitle.isEmpty {
+                        title = newTitle
+                        onTitleChanged(newTitle)
+                    }
+                case .confirm:
+                    let final = (insight?.isEmpty == false ? insight! : streamingText)
+                    if !final.isEmpty { appendAgentNote(final) }
                 }
-            case .confirm:
-                let final = (insight?.isEmpty == false ? insight! : streamingText)
-                if !final.isEmpty { appendAgentNote(final) }
+                // 同一轮更新里清空，避免正式消息和流式气泡同时出现
+                streamingText = ""
+                streamingCards = []
             }
-            // 同一轮更新里清空，避免正式消息和流式气泡同时出现
-            streamingText = ""
-            streamingCards = []
 
         case .failed(let message):
             errorText = message
             settle(fallback: AgentFeedback.incomplete(context, reason: message))
+        }
+    }
+
+    /// 每来一个字亮一下；停止吐字 450ms 后自动熄掉，不留一根静止的蓝条在句尾
+    private func pulseCaret() {
+        caretOn = true
+        caretTask?.cancel()
+        caretTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            caretOn = false
         }
     }
 

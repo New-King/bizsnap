@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var busy = false
     @State private var message: String?
     @State private var messageIsError = false
+    @State private var dismissTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -24,6 +25,7 @@ struct SettingsView: View {
                                 .foregroundStyle(messageIsError ? Theme.red : Theme.green)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 4)
+                                .transition(.opacity)
                         }
                     }
                     .padding(20)
@@ -166,7 +168,16 @@ struct SettingsView: View {
     }
 
     private func show(_ text: String, isError: Bool) {
-        message = text
-        messageIsError = isError
+        withAnimation(.easeOut(duration: 0.2)) {
+            message = text
+            messageIsError = isError
+        }
+        // 反馈自熄：2.5 秒后淡出，不长期占着版面
+        dismissTask?.cancel()
+        dismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.35)) { message = nil }
+        }
     }
 }

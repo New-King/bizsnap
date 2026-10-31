@@ -2,17 +2,20 @@ import SwiftUI
 import UIKit
 
 enum Theme {
-    // 三层递进，跟随系统浅色/深色
-    static let background = Color.adaptive(light: 0xF4F5F7, dark: 0x0E0F12)
-    static let surface = Color.adaptive(light: 0xFFFFFF, dark: 0x16181D)
-    static let elevated = Color.adaptive(light: 0xFFFFFF, dark: 0x1E2128)
+    // 深色走中性黑，靠 1%–3% 的明度差分层，不用纯黑也不用蓝灰
+    static let background = Color.adaptive(light: 0xF5F5F3, dark: 0x0B0B0A)
+    static let surface = Color.adaptive(light: 0xFCFCFB, dark: 0x151515)
+    static let elevated = Color.adaptive(light: 0xFFFFFF, dark: 0x1A1A19)
+    /// 最内层：输入框、选中态的底
+    static let inset = Color.adaptive(light: 0xF0F0EE, dark: 0x20201E)
 
     // 单一蓝色强调
     static let accent = Color.adaptive(light: 0x3D6EF0, dark: 0x5B8CFF)
     static let accentSoft = Color.adaptive(light: 0x5B8CFF, dark: 0x7AA2FF)
 
-    static let textPrimary = Color.adaptive(light: 0x111318, dark: 0xF2F3F5)
-    static let textSecondary = Color.adaptive(light: 0x565E6C, dark: 0xA0A6B0)
+    // 深色下正文不上纯白：白字在暗底上会「发胖」
+    static let textPrimary = Color.adaptive(light: 0x111318, dark: 0xE9EBEF)
+    static let textSecondary = Color.adaptive(light: 0x565E6C, dark: 0x9BA1AB)
     static let textTertiary = Color.adaptive(light: 0x8A91A0, dark: 0x6B7280)
 
     static let green = Color.adaptive(light: 0x1FA84E, dark: 0x34C759)
