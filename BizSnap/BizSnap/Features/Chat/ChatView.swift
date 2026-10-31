@@ -467,7 +467,13 @@ struct ChatView: View {
         hideKeyboard()
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let base64 = image.flatMap { ImageCompressor.jpegBase64($0) }
-        guard !content.isEmpty || base64 != nil else { return }
+        guard !content.isEmpty || base64 != nil else {
+            // 选了图却压不出来：不能静默什么都不发生
+            if image != nil {
+                appendAgentNote(AgentFeedback.imageUnreadable)
+            }
+            return
+        }
 
         messages.append(.localUser(text: content, imageBase64: base64))
         text = ""
@@ -501,40 +507,14 @@ struct ChatView: View {
                 imageBase64: imageBase64,
                 snapshot: snapshot
             ) { event in
-                switch event {
-                case .text(let delta):
-                    streamingText += delta
-                case .card:
-                    // 卡片不在流式阶段渲染：模型先调工具后写字，卡片必然先到，
-                    // 放出去就是「按钮先于文字」。等 done 的正式消息一起显示
-                    break
-                case .done(let message, _, _, let newTitle):
-                    if let message { messages.append(message) }
-                    if let newTitle, !newTitle.isEmpty {
-                        title = newTitle
-                        onTitleChanged(newTitle)
-                    }
-                    // 同一轮更新里清空，避免正式消息和流式气泡同时出现
-                    streamingText = ""
-                    streamingCards = []
-                case .failed(let message):
-                    errorText = message
-                    streamFailed = true
-                default:
-                    break
-                }
+                if case .failed = event { streamFailed = true }
+                apply(event, context: .turn)
             }
             lastFailed = streamFailed ? (content, imageBase64) : nil
-            if streamFailed, !streamingText.isEmpty {
-                messages.append(.localAssistant(text: streamingText))
-            }
         } catch {
             errorText = error.localizedDescription
             lastFailed = (content, imageBase64)
-            // 已经吐出来的片段留着，标成未完成，别让用户白等一场
-            if !streamingText.isEmpty {
-                messages.append(.localAssistant(text: streamingText))
-            }
+            settle(fallback: AgentFeedback.disconnected(.turn, reason: error.localizedDescription))
         }
 
         sending = false
@@ -573,50 +553,94 @@ struct ChatView: View {
 
         do {
             try await client.confirmStreaming(threadId: threadId, cards: cards) { event in
-                switch event {
-                case .written(let written, _):
-                    // 事务已提交：先把卡片折叠掉，再去写系统通讯录 / 日历
-                    let okIds = Set(written.filter(\.ok).map(\.cardId))
-                    markConfirmed(okIds)
-                    for item in written where !item.ok {
-                        localErrors[item.cardId] = CardFailure(
-                            message: item.error ?? "写入失败",
-                            needsSettings: false
-                        )
-                    }
-                    let targets = cards.filter { okIds.contains($0.id) }
-                    Task { await writeToSystem(targets) }
-
-                case .text(let delta):
-                    streamingText += delta
-
-                case .done(_, let insight, _, _):
-                    let final = (insight?.isEmpty == false ? insight! : streamingText)
-                    if !final.isEmpty {
-                        messages.append(.localAssistant(text: final))
-                    }
-                    streamingText = ""
-
-                case .failed(let message):
-                    errorText = message
-
-                default:
-                    break
-                }
+                apply(event, context: .confirm)
             }
             selected.removeAll()
         } catch {
             errorText = error.localizedDescription
+            settle(fallback: AgentFeedback.disconnected(.confirm, reason: error.localizedDescription))
         }
 
         confirming = false
         streamingText = ""
     }
 
-    private func writeToSystem(_ cards: [ActionCard]) async {
-        for card in cards {
-            await write(card)
+    // MARK: - 流的统一落点
+
+    /// 一条流的所有事件都在这里变成界面状态；别再在调用处另写一套 switch
+    private func apply(_ event: StreamEvent, context: AgentFeedback.Context) {
+        switch event {
+        case .started:
+            break
+
+        case .text(let delta):
+            streamingText += delta
+
+        case .card:
+            // 卡片不在流式阶段渲染：模型先调工具后写字，卡片必然先到，
+            // 放出去就是「按钮先于文字」。等 done 的正式消息一起显示
+            break
+
+        case .written(let written, _):
+            guard context == .confirm else { return }
+            // 事务已提交：先把卡片折叠掉，再去写系统通讯录 / 日历
+            let okIds = Set(written.filter(\.ok).map(\.cardId))
+            markConfirmed(okIds)
+            for item in written where !item.ok {
+                localErrors[item.cardId] = CardFailure(
+                    message: item.error ?? "写入失败",
+                    needsSettings: false
+                )
+            }
+            let targets = pickedCards.filter { okIds.contains($0.id) }
+            Task { await writeToSystem(targets) }
+
+        case .done(let message, let insight, _, let newTitle):
+            switch context {
+            case .turn:
+                if let message { messages.append(message) }
+                if let newTitle, !newTitle.isEmpty {
+                    title = newTitle
+                    onTitleChanged(newTitle)
+                }
+            case .confirm:
+                let final = (insight?.isEmpty == false ? insight! : streamingText)
+                if !final.isEmpty { appendAgentNote(final) }
+            }
+            // 同一轮更新里清空，避免正式消息和流式气泡同时出现
+            streamingText = ""
+            streamingCards = []
+
+        case .failed(let message):
+            errorText = message
+            settle(fallback: AgentFeedback.incomplete(context, reason: message))
         }
+    }
+
+    /// 收尾：有半截内容就留半截；一句都没有就用给定那句话，绝不留下一条空消息
+    private func settle(fallback: String) {
+        appendAgentNote(streamingText.isEmpty ? fallback : streamingText)
+    }
+
+    /// 任何交互都要落在消息里：只改顶部状态条，用户会以为刚才那一下没生效
+    private func appendAgentNote(_ note: String) {
+        messages.append(.localAssistant(text: note))
+    }
+
+    private func writeToSystem(_ cards: [ActionCard]) async {
+        var failures: [(card: ActionCard, message: String)] = []
+        for card in cards {
+            if let message = await write(card) {
+                failures.append((card, message))
+            }
+        }
+        // 系统侧失败也要有话说：卡片只是标红，为什么没成、下一步做什么得讲清
+        guard !failures.isEmpty else { return }
+        appendAgentNote(
+            AgentFeedback.systemWriteFailed(
+                failures.map { (label: $0.card.kind.label, who: $0.card.contactName, reason: $0.message) }
+            )
+        )
     }
 
     private func retryLocal(_ card: ActionCard) async {
@@ -625,16 +649,28 @@ struct ChatView: View {
             openSettings()
             return
         }
-        await write(card)
+        if let message = await write(card) {
+            appendAgentNote(
+                AgentFeedback.retryStillFailed(
+                    label: card.kind.label,
+                    who: card.contactName,
+                    reason: message
+                )
+            )
+        }
     }
 
-    private func write(_ card: ActionCard) async {
+    /// 返回失败原因；成功返回 nil
+    @discardableResult
+    private func write(_ card: ActionCard) async -> String? {
         do {
             _ = try await CardExecutor.execute(card)
             localErrors[card.id] = nil
             writtenIds.insert(card.id)
+            return nil
         } catch {
             record(error, for: card.id)
+            return error.localizedDescription
         }
     }
 
