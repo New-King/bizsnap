@@ -113,7 +113,7 @@ bizsnap/
 │       ├── App/RootView.swift
 │       ├── Models/{DTO,ActionCard,ChatMessage,StreamEvent,TraceStep}.swift
 │       ├── Services/{AgentClient,SSEParser,ImageCompressor,ContactsService,CalendarService,CardExecutor}.swift
-│       ├── Features/Chat/{ChatView,MessageBubble,CardStrip,Composer,ErrorBar,AgentFeedback,AgentTraceView}.swift
+│       ├── Features/Chat/{ChatView,MessageBubble,MarkdownText,CardStrip,Composer,ErrorBar,AgentFeedback,AgentTraceView}.swift
 │       ├── Features/ThreadList/ThreadDrawer.swift
 │       ├── Features/Settings/SettingsView.swift
 │       └── Theme/Tokens.swift
@@ -240,6 +240,8 @@ type ChatMessage = {
 - `services/confirm.ts` 的 `groundBackground()` 做字符串校对：去标点空白后整段命中 → 通过；否则切成三字片段，命中率 ≥ 50% → 通过；都不满足 → 置空并 `console.warn`
 
 校对依据是**该会话最近 6 条消息的正文**（user 与 assistant 都算）：截图里的内容看不见，但助手会把读到的事复述在回复里，这段复述就是依据。
+
+`background` 的最终写法是「做了什么 + 起因」：`新建联系人（公司、职位）｜更新资料（手机）｜约会议：标题（开始时间）` 加上 `；原因：<有依据的片段>`；片段短于 6 字（「线下」「明天」）当不了起因，只留动作。
 
 ### 3. 写入路径
 
@@ -449,7 +451,7 @@ iOS 17.0、`PRODUCT_BUNDLE_IDENTIFIER = com.newking.bizsnap`、竖屏、`Info.pl
 **聊天页（`ChatView`）**
 
 - 顶部：左汉堡开抽屉，中间标题（可点改名）+ 服务状态圆点，右侧 `confirming` 时显示小菊花
-- 消息流：气泡 + 卡片，`AgentTraceView` 在气泡上方
+- 消息流：气泡 + 卡片，`AgentTraceView` 在气泡上方；助手正文用 `MarkdownText` 渲染（粗体、斜体、行内代码、标题、列表、表格；表格列按内容宽度、超宽可横向滑动）
 - 空态：一句轻提示「把一段商务对话，变成通讯录里的一条记录」
 - 流式气泡：首字之前显示竖条 loading（`TypingBars`：5 根 3×15 胶囊，`scaleEffect(y:)` 在 1 ↔ 0.3 之间，每根延迟 0.1s、0.45s 一次往返，颜色 `textSecondary`）；首字到达后换成真实气泡 + 光标
 - 输入栏（`Composer`）：左侧图片按钮直接打开相册（不弹二级菜单），中间输入框，右侧发送；选图后上方显示缩略图与「×」

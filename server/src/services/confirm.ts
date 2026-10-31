@@ -83,6 +83,42 @@ function groundBackground(reason: string | undefined, input: string): string {
   return '';
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  industry: '行业',
+  company: '公司',
+  position: '职位',
+  project: '项目',
+  relation: '关系',
+  phone: '手机',
+  email: '邮箱',
+};
+
+/** 这次动了什么，用一句短话说清，作为 background 的主干 */
+function actionLabel(kind: CardDraft['kind'], payload: unknown): string {
+  if (kind === 'create_contact') {
+    const keys = Object.keys(payload as Record<string, unknown>).filter((key) => key !== 'name');
+    const labels = keys.map((key) => FIELD_LABELS[key] ?? key);
+    return labels.length ? `新建联系人（${labels.join('、')}）` : '新建联系人';
+  }
+  if (kind === 'update_contact') {
+    const changes = (payload as UpdateContactPayload).changes ?? {};
+    const labels = Object.keys(changes).map((key) => FIELD_LABELS[key] ?? key);
+    return labels.length ? `更新资料（${labels.join('、')}）` : '更新资料';
+  }
+  const meeting = payload as CreateMeetingPayload;
+  return `约会议：${meeting.title}（${meeting.startTime}）`;
+}
+
+/**
+ * background = 做了什么 + 起因。
+ * 起因仍要能在对话里找到依据；「线下」「明天」这种短片段当不了起因，只留动作。
+ */
+function composeBackground(action: string, reason: string | undefined, evidence: string): string {
+  const grounded = groundBackground(reason, evidence);
+  const cause = grounded.length >= 6 ? grounded : '';
+  return cause ? `${action}；原因：${cause}` : action;
+}
+
 function baseInteraction(params: {
   contactId: string;
   groupId: string;
@@ -177,7 +213,7 @@ export async function confirmCards(
   // 第一轮：联系人卡（先定下本次会话的主联系人）
   for (const card of fresh) {
     if (card.kind !== 'create_contact' && card.kind !== 'update_contact') continue;
-    const background = groundBackground(card.reason, evidence);
+    const background = composeBackground(actionLabel(card.kind, card.payload), card.reason, evidence);
 
     if (card.kind === 'create_contact') {
       const payload = card.payload as CreateContactPayload;
@@ -289,7 +325,7 @@ export async function confirmCards(
   for (const card of fresh) {
     if (card.kind !== 'create_meeting') continue;
     const payload = card.payload as CreateMeetingPayload;
-    const background = groundBackground(card.reason, evidence);
+    const background = composeBackground(actionLabel(card.kind, card.payload), card.reason, evidence);
     const ownerName = primaryName || payload.participants?.[0] || '';
     const owner = ownerName
       ? planned.get(contactIdOf(ownerName)) ?? (await findContactByName(ownerName))

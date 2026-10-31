@@ -23,14 +23,22 @@ struct MessageBubble: View {
             }
 
             if let text = message.text, !text.isEmpty {
-                Text(text)
-                    .font(.system(size: 15))
-                    .foregroundStyle(message.isUser ? Color.white : Theme.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .background(bubbleBackground)
-                    .overlay(bubbleBorder)
+                Group {
+                    if message.isUser {
+                        Text(text)
+                            .font(.system(size: 15))
+                            .foregroundStyle(Color.white)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        // 回答里的表格、加粗、斜体、列表交给 MarkdownText
+                        MarkdownText(text: text)
+                            .foregroundStyle(Theme.textPrimary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(bubbleBackground)
+                .overlay(bubbleBorder)
             }
         }
         .frame(maxWidth: 300, alignment: message.isUser ? .trailing : .leading)
