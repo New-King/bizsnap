@@ -20,7 +20,7 @@ export type ContactRecord = {
   searchCurrent: string;
   /** 派生列：各属性历史值，空格分隔 */
   searchHistory: string;
-  /** 派生列：对 searchCurrent + searchHistory 拼成一句后嵌入，JSON 数组文本 */
+  /** 派生列：只对「姓名 + 各属性当前值」嵌入（见 embeddingTextOf），JSON 数组文本；历史值不进向量 */
   embedding: string | null;
   lastContactAt: string | null;
   interactionCount: number;
