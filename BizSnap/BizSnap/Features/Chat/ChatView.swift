@@ -32,6 +32,8 @@ struct ChatView: View {
     /// 光标只在「正在吐字」时亮：停止吐字 450ms 自动熄，不留一根静止的蓝条
     @State private var caretOn = false
     @State private var caretTask: Task<Void, Never>?
+    /// 本轮是否已经收尾：收尾后不再显示等待中的三点，避免卡片出来又闪一下
+    @State private var turnDone = true
     @State private var errorText: String?
     @State private var localErrors: [String: CardFailure] = [:]
     /// 真的写进系统的卡片；服务端 confirmed 只是业务库已落库
@@ -82,7 +84,8 @@ struct ChatView: View {
                                     .transition(.opacity)
                             }
 
-                            if sending || !streamingText.isEmpty {
+                            // 等待首字（发消息 / 确认后生成洞察）与正在吐字，都显示这条气泡
+                            if !streamingText.isEmpty || ((sending || confirming) && !turnDone) {
                                 streamingBubble
                             }
 
@@ -106,6 +109,13 @@ struct ChatView: View {
                     }
                     .onChange(of: sending) { _, isSending in
                         guard isSending else { return }
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("stream-end", anchor: .bottom)
+                        }
+                    }
+                    // 确认后生成洞察也会先等一会儿：等待气泡出现时要跟到底部
+                    .onChange(of: confirming) { _, isConfirming in
+                        guard isConfirming else { return }
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo("stream-end", anchor: .bottom)
                         }
@@ -287,21 +297,20 @@ struct ChatView: View {
         .padding(.top, 110)
     }
 
+    /// 等首字：气泡里三个点依次上浮，比两条灰条更像「正在想」
     private var skeleton: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Theme.surface)
-                .frame(width: 220, height: 14)
-                .shimmering()
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Theme.surface)
-                .frame(width: 150, height: 14)
-                .shimmering()
-        }
-        .padding(14)
-        .frame(maxWidth: 300, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.surface.opacity(0.5)))
-        .frame(maxWidth: .infinity, alignment: .leading)
+        TypingDots()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Theme.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Theme.stroke.opacity(0.07), lineWidth: 1)
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// 流式中的临时气泡：先骨架，收到第一个字就换成真实气泡，卡片随工具返回冒出
@@ -509,6 +518,7 @@ struct ChatView: View {
         streamingText = ""
         streamingCards = []
         errorText = nil
+        turnDone = false
         var streamFailed = false
 
         do {
@@ -524,6 +534,7 @@ struct ChatView: View {
             }
             lastFailed = streamFailed ? (content, imageBase64) : nil
         } catch {
+            turnDone = true
             errorText = error.localizedDescription
             lastFailed = (content, imageBase64)
             settle(fallback: AgentFeedback.disconnected(.turn, reason: error.localizedDescription))
@@ -562,6 +573,7 @@ struct ChatView: View {
         confirming = true
         streamingText = ""
         errorText = nil
+        turnDone = false
 
         do {
             try await client.confirmStreaming(threadId: threadId, cards: cards) { event in
@@ -569,6 +581,7 @@ struct ChatView: View {
             }
             selected.removeAll()
         } catch {
+            turnDone = true
             errorText = error.localizedDescription
             settle(fallback: AgentFeedback.disconnected(.confirm, reason: error.localizedDescription))
         }
@@ -615,6 +628,7 @@ struct ChatView: View {
         case .done(let message, let insight, _, let newTitle):
             caretTask?.cancel()
             caretOn = false
+            turnDone = true
             // 换正式消息：正文原地淡入，卡片在 MessageRow 里逐个浮现
             withAnimation(.easeOut(duration: 0.3)) {
                 switch context {
@@ -639,6 +653,7 @@ struct ChatView: View {
             onTitleChanged(value)
 
         case .failed(let message):
+            turnDone = true
             errorText = message
             settle(fallback: AgentFeedback.incomplete(context, reason: message))
         }
@@ -729,6 +744,33 @@ struct ChatView: View {
 struct ImagePreviewItem: Identifiable {
     let id = UUID()
     let image: UIImage
+}
+
+/// 首字到达前的等待：三个点依次上浮。
+/// 点色走 Theme.textSecondary（浅色偏深、深色偏亮），两种模式下都不会糊在气泡底上。
+private struct TypingDots: View {
+    @State private var animating = false
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Theme.textSecondary)
+                    .frame(width: 7, height: 7)
+                    .offset(y: animating ? -3 : 0)
+                    .opacity(animating ? 1 : 0.42)
+                    .animation(
+                        .easeInOut(duration: 0.45)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.14),
+                        value: animating
+                    )
+            }
+        }
+        .frame(height: 18)
+        .onAppear { animating = true }
+        .onDisappear { animating = false }
+    }
 }
 
 /// 卡片逐个浮现：正文先落位，按钮再按顺序淡淡出来，不跟文字一起整体上移

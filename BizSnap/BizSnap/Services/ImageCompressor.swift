@@ -1,12 +1,15 @@
 import UIKit
 
 enum ImageCompressor {
-    /// 截图压到最长边 1280、质量 0.7：够模型读文字，又不至于让请求体过大
-    static func jpegBase64(_ image: UIImage, maxDimension: CGFloat = 1280, quality: CGFloat = 0.7) -> String? {
-        let longest = max(image.size.width, image.size.height)
-        guard longest > 0 else { return nil }
-        let scale = min(1, maxDimension / longest)
-        let target = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+    /// 官方规则（api-docs.deepseek.com/zh-cn/guides/vision）：每张图进模型前会被等比缩到
+    /// 「总像素约 1300×1300」，每图 token 封顶 1024。本地按同一总像素压即可：
+    /// 既不糊，也不白传像素；再长的截图，模型看到的同样是这个上限。
+    static func jpegBase64(_ image: UIImage, maxPixels: CGFloat = 1300 * 1300, quality: CGFloat = 0.7) -> String? {
+        let width = image.size.width
+        let height = image.size.height
+        guard width > 0, height > 0 else { return nil }
+        let scale = width * height > maxPixels ? sqrt(maxPixels / (width * height)) : 1
+        let target = CGSize(width: width * scale, height: height * scale)
         let renderer = UIGraphicsImageRenderer(size: target)
         let resized = renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: target))

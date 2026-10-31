@@ -70,6 +70,10 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
   if (!text && !imageBase64) {
     throw new HTTPException(400, { message: '请发一句话或一张截图' });
   }
+  // 客户端已经按宽度压过，正常在 1MB 以内；超过这个量级说明没走压缩，直接挡掉
+  if (imageBase64 && imageBase64.length > 12 * 1024 * 1024) {
+    throw new HTTPException(400, { message: '截图太大了，先压一下再发' });
+  }
 
   const userMessageId = newId();
   await insertMessage(threadId, { id: userMessageId, role: 'user', text, imageBase64 });
@@ -85,7 +89,8 @@ messageRoutes.post('/threads/:id/messages', async (c) => {
       mediaType: detectMediaType(imageBase64),
     });
   }
-  content.push({ type: 'text', text: text || '请读这张截图里的商务信息。' });
+  // 只发图不打字时，默认文本要带上「整理成记录」：只写「读一下」模型就只读不建卡
+  content.push({ type: 'text', text: text || '请读这张截图里的商务信息，把能确定的内容整理成记录。' });
 
   const requestContext = new RequestContext();
   requestContext.set('contactsSnapshot', body.contactsSnapshot ?? []);
