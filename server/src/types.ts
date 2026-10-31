@@ -85,8 +85,6 @@ export type CreateMeetingPayload = {
 export type CardDraft = {
   id: string;
   kind: CardKind;
-  /** 由模型给出的原因，confirm 时校验后才写进 interaction.background */
-  reason?: string;
   payload: CreateContactPayload | UpdateContactPayload | CreateMeetingPayload;
 };
 

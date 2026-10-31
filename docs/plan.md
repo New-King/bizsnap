@@ -96,7 +96,8 @@ bizsnap/
 │       ├── services/
 │       │   ├── attributes.ts   时间线封口与合并、renderTimeline、currentValue(s)
 │       │   ├── embedding.ts    拼检索文本、调嵌入、算余弦、buildSearchColumns
-│       │   ├── confirm.ts      确认编排（单事务、background 校对、系统写入结果）
+│       │   ├── background.ts   单独一次调用，用最近对话与这批卡片生成每条记录的原因
+│       │   ├── confirm.ts      确认编排（单事务、背景生成、系统写入结果）
 │       │   ├── insight.ts      streamInsight / streamFailureNote
 │       │   ├── trace.ts        TraceRecorder：把流事件收成可展示的链路
 │       │   └── demo-seed.ts    resetDemo：清业务数据与会话表，回传需从系统侧删除的名单
@@ -183,7 +184,6 @@ type CardKind = 'create_contact' | 'update_contact' | 'create_meeting';
 type CardDraft = {
   id: string;             // 工具生成，确认时原样带回
   kind: CardKind;
-  reason?: string;        // 模型复述的输入原话，confirm 时校对
   payload:
     | { name: string; phone?: string; email?: string; industry?: string; company?: string; position?: string; project?: string; relation?: string }
     | { targetName: string; changes: Record<string, string> }
@@ -232,16 +232,16 @@ type ChatMessage = {
 - 同一天内改两次：区间收敛成当天有效（`from == to`），展示为「2026-10-30 为 建筑设计」
 - `history` 是 `interactions` 的物化投影，只能由确认接口派生，任何读取路径不许写
 
-### 2. `background` 不许模型编
+### 2. `background` 单独生成
 
-只复述输入里明确出现的原因，没有就空字符串。两道关卡：
+确认时对这批卡片单独调一次模型（`services/background.ts`，`generateText`，不带工具），输入给全：
 
-- 三个出卡工具的 `reason` 参数说明里写清：一句话说明起因、引用输入原话、没有依据就留空
-- `services/confirm.ts` 的 `groundBackground()` 做字符串校对：去标点空白后整段命中 → 通过；否则切成三字片段，命中率 ≥ 50% → 通过；都不满足 → 置空并 `console.warn`
+- 该会话最近 10 条消息正文（user 与 assistant 都算）
+- 这批卡片的 `kind` 与字段（谁、公司、职位、时间、参会人）
 
-校对依据是**该会话最近 6 条消息的正文**（user 与 assistant 都算）：截图里的内容看不见，但助手会把读到的事复述在回复里，这段复述就是依据。
+输出每条记录一段 1–2 句中文：先说起因（对话里说了什么、发生了什么事），再说这次要落成什么；只用对话里出现的信息，不推测。
 
-`background` 的最终写法是「做了什么 + 起因」：`新建联系人（公司、职位）｜更新资料（手机）｜约会议：标题（开始时间）` 加上 `；原因：<有依据的片段>`；片段短于 6 字（「线下」「明天」）当不了起因，只留动作。
+生成失败或解析不出时，退回动作摘要：`新建联系人（公司、职位）｜更新资料（手机）｜约会议：标题（开始时间）`。写库时用这段文本填 `interactions.background`。
 
 ### 3. 写入路径
 
@@ -324,9 +324,9 @@ export const bizAgent = new Agent({
 | `get_contact_history` | `name: string`、`limit?`（默认 8） | 该人完整属性时间线 + 最近 N 条事件；找不到时返回 `{ found: false, message }` |
 | `list_contacts` | `days?`、`limit?`（默认 10） | 按最近往来倒序列出联系人，只返回姓名 / 公司 / 职位；要电话、关系、项目等细节交给 `search_contact` |
 | `list_interactions` | `kind?: created \| updated \| meeting \| any`（默认 any）、`days?`（默认 30）、`name?`、`limit?`（默认 10） | 按时间倒序列出事件，带谁、什么事、原因与会议信息；查会议用 `kind: 'meeting'` |
-| `create_contact` | `name`（必填）+ phone / email / industry / company / position / project / relation + `reason?` | 只返回 `{ draft }`；同名已存在时返回 `{ error }`，提示改用 `update_contact` |
-| `update_contact` | `target_name`（必填）+ 任意要改字段 + `reason?` | 只返回 `{ draft, current }`；目标不存在或字段全无变化时返回 `{ error }` |
-| `create_meeting` | `title` / `start_time`（必填，带偏移 ISO 8601）/ `end_time?` / `participants`（非空数组）/ `location?` / `remark?` / `reason?` | 只返回 `{ draft }`；时间格式非法或结束早于开始时返回 `{ error }`；省略结束时间按 60 分钟补齐 |
+| `create_contact` | `name`（必填）+ phone / email / industry / company / position / project / relation | 只返回 `{ draft }`；同名已存在时返回 `{ error }`，提示改用 `update_contact` |
+| `update_contact` | `target_name`（必填）+ 任意要改字段 | 只返回 `{ draft, current }`；目标不存在或字段全无变化时返回 `{ error }` |
+| `create_meeting` | `title` / `start_time`（必填，带偏移 ISO 8601）/ `end_time?` / `participants`（非空数组）/ `location?` / `remark?` | 只返回 `{ draft }`；时间格式非法或结束早于开始时返回 `{ error }`；省略结束时间按 60 分钟补齐 |
 
 `search_contact` 需要设备通讯录快照：从本轮请求的 `contactsSnapshot` 里按姓名归一化或电话后 7 位匹配，用来填 `inDevice`。
 
@@ -343,7 +343,7 @@ export const bizAgent = new Agent({
 | DELETE | `/api/threads/:id` | — | `{ ok }`，连消息一起删 |
 | GET | `/api/threads/:id/messages` | — | `ChatMessage[]`，卡片带 `confirmed` 标记（按 `confirmed_cards` 判定），带 `trace` |
 | POST | `/api/threads/:id/messages` | `{ text?, imageBase64?, contactsSnapshot? }` | SSE |
-| POST | `/api/threads/:id/confirm` | `{ cards: [{ id, kind, reason?, payload }] }` | SSE |
+| POST | `/api/threads/:id/confirm` | `{ cards: [{ id, kind, payload }] }` | SSE |
 | POST | `/api/demo/reset` | — | `{ ok, createdNames, meetingTitles }`，清业务数据 + 会话表，回传要从系统侧删掉的名单 |
 
 `contactsSnapshot` 最多 200 条，只含 `name` / `company` / `position` / `phones`。
@@ -553,7 +553,7 @@ iOS 17.0、`PRODUCT_BUNDLE_IDENTIFIER = com.newking.bizsnap`、竖屏、`Info.pl
 
 - 六个工具只读或只出草案；写库只发生在确认接口，单事务
 - `history` 与检索列只由确认流程派生，任何读取路径不写
-- `background` 只复述输入里出现的原因，没有依据就留空
+- `background` 由独立调用生成，只用对话里出现的信息；生成不了就用动作摘要
 - 跨会话找人只走数据库检索，不用聊天消息向量召回
 - 洞察只回给前端，不落库
 - 卡片只读：内容不对就在输入栏继续说一句，agent 重出卡片，旧卡自动置灰

@@ -34,7 +34,6 @@ export const createMeeting = createTool({
     participants: z.array(z.string()).min(1).describe('参会人姓名列表'),
     location: z.string().optional().describe('地点，线上会写会议方式'),
     remark: z.string().optional().describe('会议要谈什么'),
-    reason: z.string().optional().describe('这次记录的原因：一句话说明起因，引用输入里的原话；没有依据就留空'),
   }),
   execute: async (input) => {
     if (!isValidIso(input.start_time)) {
@@ -64,7 +63,6 @@ export const createMeeting = createTool({
     const draft: CardDraft = {
       id: newId(),
       kind: 'create_meeting',
-      reason: input.reason?.trim() || undefined,
       payload,
     };
     return { draft };

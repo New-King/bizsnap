@@ -39,7 +39,6 @@ function statusNote(written: WrittenCard[]): string {
 const cardSchema = z.object({
   id: z.string(),
   kind: z.enum(['create_contact', 'update_contact', 'create_meeting']),
-  reason: z.string().optional(),
   payload: z.record(z.string(), z.unknown()),
 });
 

@@ -142,10 +142,11 @@ final class AgentClient: ObservableObject {
         onEvent: @escaping (StreamEvent) -> Void
     ) async throws {
         let payload = cards.map { card -> [String: Any] in
-            var dict: [String: Any] = ["id": card.id, "kind": card.kind.rawValue]
-            if let reason = card.reason { dict["reason"] = reason }
-            dict["payload"] = card.payload.jsonObject
-            return dict
+            [
+                "id": card.id,
+                "kind": card.kind.rawValue,
+                "payload": card.payload.jsonObject,
+            ]
         }
         let body = try JSONSerialization.data(withJSONObject: ["cards": payload])
         try await stream(path: "/api/threads/\(threadId)/confirm", body: body, onEvent: onEvent)

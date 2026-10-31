@@ -25,7 +25,6 @@ export const updateContact = createTool({
     position: z.string().optional(),
     project: z.string().optional(),
     relation: z.string().optional(),
-    reason: z.string().optional().describe('这次记录的原因：一句话说明起因，引用输入里的原话；没有依据就留空'),
   }),
   execute: async (input) => {
     const contact = await findContactByName(input.target_name);
@@ -55,7 +54,6 @@ export const updateContact = createTool({
     const draft: CardDraft = {
       id: newId(),
       kind: 'update_contact',
-      reason: input.reason?.trim() || undefined,
       payload,
     };
     return { draft, current: { company: currentValue(contact, 'company'), position: currentValue(contact, 'position') } };

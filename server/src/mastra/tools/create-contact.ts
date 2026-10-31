@@ -16,7 +16,6 @@ export const createContact = createTool({
     position: z.string().optional().describe('职位'),
     project: z.string().optional().describe('正在合作或讨论的项目'),
     relation: z.string().optional().describe('关系，如 客户、供应商、前同事'),
-    reason: z.string().optional().describe('这次记录的原因：一句话说明起因，引用输入里的原话；没有依据就留空'),
   }),
   execute: async (input) => {
     const existed = await findContactByName(input.name);
@@ -35,7 +34,6 @@ export const createContact = createTool({
     const draft: CardDraft = {
       id: newId(),
       kind: 'create_contact',
-      reason: input.reason?.trim() || undefined,
       payload,
     };
     return { draft };

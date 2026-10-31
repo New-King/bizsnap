@@ -108,6 +108,18 @@ export async function listMessages(threadId: string): Promise<ChatMessage[]> {
   }));
 }
 
+/** 最近几条消息（带角色），用来给背景生成提供上下文 */
+export async function getRecentMessages(
+  threadId: string,
+  limit = 10,
+): Promise<{ role: string; text: string }[]> {
+  const messages = await listMessages(threadId);
+  return messages
+    .map((message) => ({ role: message.role, text: (message.text ?? '').trim() }))
+    .filter((message) => message.text.length > 0)
+    .slice(-limit);
+}
+
 /** background 的依据：这个会话最近几条消息的正文（user 与 assistant 都算） */
 export async function getRecentText(threadId: string, limit = 6): Promise<string> {
   const messages = await listMessages(threadId);

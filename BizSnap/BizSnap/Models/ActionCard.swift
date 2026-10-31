@@ -82,7 +82,6 @@ enum CardKind: String, Codable {
 struct ActionCard: Codable, Identifiable, Hashable {
     let id: String
     let kind: CardKind
-    let reason: String?
     let payload: JSONValue
     /// 服务端记录的确认状态：刷新后已写入的卡片仍然折叠
     var confirmed: Bool?

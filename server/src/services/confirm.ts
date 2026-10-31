@@ -10,7 +10,7 @@ import {
 } from '../db/contacts.js';
 import {
   getLastUserMessage,
-  getRecentText,
+  getRecentMessages,
   getThread,
   listConfirmedCardIds,
   updateThread,
@@ -27,6 +27,7 @@ import type {
   UpdateContactPayload,
 } from '../types.js';
 import { applyChange, currentValue, localDate } from './attributes.js';
+import { generateBackgrounds } from './background.js';
 import { buildSearchColumns, computeContactEmbedding } from './embedding.js';
 import type { InsightSource } from './insight.js';
 
@@ -58,31 +59,6 @@ type CardPlan = {
   error?: string;
 };
 
-const normalize = (s: string) => s.replace(/[\s，。,.!?！？、；;：:"'「」“”()（）~-]/g, '');
-
-/**
- * reason 必须能在本轮输入里找到依据：整段命中，或至少一半的三字片段命中。
- * 找不到就置空，宁可少一条原因，也不要编。
- */
-function groundBackground(reason: string | undefined, input: string): string {
-  const trimmed = (reason ?? '').trim();
-  if (!trimmed) return '';
-  const a = normalize(trimmed);
-  const b = normalize(input);
-  if (!a || !b) return '';
-  if (b.includes(a)) return trimmed;
-
-  const grams = new Set<string>();
-  for (let i = 0; i + 3 <= a.length; i += 1) grams.add(a.slice(i, i + 3));
-  if (!grams.size) return '';
-  let hit = 0;
-  for (const gram of grams) if (b.includes(gram)) hit += 1;
-  if (hit / grams.size >= 0.5) return trimmed;
-
-  console.warn(`[bizsnap] background 在本轮输入里找不到依据，已置空：「${trimmed}」`);
-  return '';
-}
-
 const FIELD_LABELS: Record<string, string> = {
   industry: '行业',
   company: '公司',
@@ -113,12 +89,6 @@ function actionLabel(kind: CardDraft['kind'], payload: unknown): string {
  * background = 做了什么 + 起因。
  * 起因仍要能在对话里找到依据；「线下」「明天」这种短片段当不了起因，只留动作。
  */
-function composeBackground(action: string, reason: string | undefined, evidence: string): string {
-  const grounded = groundBackground(reason, evidence);
-  const cause = grounded.length >= 6 ? grounded : '';
-  return cause ? `${action}；原因：${cause}` : action;
-}
-
 function baseInteraction(params: {
   contactId: string;
   groupId: string;
@@ -198,8 +168,16 @@ export async function confirmCards(
       : 'image'
     : 'text';
 
-  // 依据 = 最近几条消息的正文：截图读到的内容由助手复述在这些消息里
-  const evidence = await getRecentText(threadId);
+  // 背景单独生成一次：给模型看最近的对话与这批卡片，让它说清起因
+  const recentMessages = await getRecentMessages(threadId, 10);
+  let backgrounds = new Map<string, string>();
+  try {
+    backgrounds = await generateBackgrounds(fresh, recentMessages);
+  } catch (error) {
+    console.warn('[bizsnap] 背景生成失败，改用动作摘要', error);
+  }
+  const backgroundOf = (card: CardDraft): string =>
+    backgrounds.get(card.id)?.trim() || actionLabel(card.kind, card.payload);
 
   const groupId = newId();
   const at = new Date().toISOString();
@@ -213,7 +191,7 @@ export async function confirmCards(
   // 第一轮：联系人卡（先定下本次会话的主联系人）
   for (const card of fresh) {
     if (card.kind !== 'create_contact' && card.kind !== 'update_contact') continue;
-    const background = composeBackground(actionLabel(card.kind, card.payload), card.reason, evidence);
+    const background = backgroundOf(card);
 
     if (card.kind === 'create_contact') {
       const payload = card.payload as CreateContactPayload;
@@ -325,7 +303,7 @@ export async function confirmCards(
   for (const card of fresh) {
     if (card.kind !== 'create_meeting') continue;
     const payload = card.payload as CreateMeetingPayload;
-    const background = composeBackground(actionLabel(card.kind, card.payload), card.reason, evidence);
+    const background = backgroundOf(card);
     const ownerName = primaryName || payload.participants?.[0] || '';
     const owner = ownerName
       ? planned.get(contactIdOf(ownerName)) ?? (await findContactByName(ownerName))
