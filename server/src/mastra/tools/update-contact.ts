@@ -15,7 +15,7 @@ const FIELD_TO_ATTR: Record<string, AttributeType> = {
 export const updateContact = createTool({
   id: 'update_contact',
   description:
-    '整理一条更新联系人的记录，只写这次要改的字段。目标必须已经存在于库里（先用 search_contact 或 get_contact_history 确认）。这里不写库，不会立刻生效。',
+    '整理一条更新联系人的记录，只写这次要改的字段。目标必须已经存在于库里（先用 search_contact 或 get_contact_history 确认）。',
   inputSchema: z.object({
     target_name: z.string().min(1).describe('要改的人，需与库里姓名一致'),
     phone: z.string().optional(),
@@ -25,7 +25,7 @@ export const updateContact = createTool({
     position: z.string().optional(),
     project: z.string().optional(),
     relation: z.string().optional(),
-    reason: z.string().optional().describe('为什么改，只复述输入里的原话'),
+    reason: z.string().optional().describe('这次记录的原因：一句话说明起因，引用输入里的原话；没有依据就留空'),
   }),
   execute: async (input) => {
     const contact = await findContactByName(input.target_name);

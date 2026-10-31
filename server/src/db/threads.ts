@@ -108,6 +108,16 @@ export async function listMessages(threadId: string): Promise<ChatMessage[]> {
   }));
 }
 
+/** background 的依据：这个会话最近几条消息的正文（user 与 assistant 都算） */
+export async function getRecentText(threadId: string, limit = 6): Promise<string> {
+  const messages = await listMessages(threadId);
+  const texts = messages
+    .map((message) => (message.text ?? '').trim())
+    .filter((text) => text.length > 0)
+    .slice(-limit);
+  return texts.join('\n');
+}
+
 /** background 校验要用：本轮用户说过的话 */
 export async function getLastUserText(threadId: string): Promise<string> {
   const message = await getLastUserMessage(threadId);

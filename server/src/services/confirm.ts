@@ -8,7 +8,13 @@ import {
   newId,
   saveContact,
 } from '../db/contacts.js';
-import { getLastUserMessage, getThread, listConfirmedCardIds, updateThread } from '../db/threads.js';
+import {
+  getLastUserMessage,
+  getRecentText,
+  getThread,
+  listConfirmedCardIds,
+  updateThread,
+} from '../db/threads.js';
 import type {
   AttributeType,
   CardDraft,
@@ -156,6 +162,9 @@ export async function confirmCards(
       : 'image'
     : 'text';
 
+  // 依据 = 最近几条消息的正文：截图读到的内容由助手复述在这些消息里
+  const evidence = await getRecentText(threadId);
+
   const groupId = newId();
   const at = new Date().toISOString();
   const date = localDate();
@@ -168,7 +177,7 @@ export async function confirmCards(
   // 第一轮：联系人卡（先定下本次会话的主联系人）
   for (const card of fresh) {
     if (card.kind !== 'create_contact' && card.kind !== 'update_contact') continue;
-    const background = groundBackground(card.reason, lastUser.text);
+    const background = groundBackground(card.reason, evidence);
 
     if (card.kind === 'create_contact') {
       const payload = card.payload as CreateContactPayload;
@@ -280,7 +289,7 @@ export async function confirmCards(
   for (const card of fresh) {
     if (card.kind !== 'create_meeting') continue;
     const payload = card.payload as CreateMeetingPayload;
-    const background = groundBackground(card.reason, lastUser.text);
+    const background = groundBackground(card.reason, evidence);
     const ownerName = primaryName || payload.participants?.[0] || '';
     const owner = ownerName
       ? planned.get(contactIdOf(ownerName)) ?? (await findContactByName(ownerName))

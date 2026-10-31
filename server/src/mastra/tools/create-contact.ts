@@ -6,7 +6,7 @@ import type { CardDraft, CreateContactPayload } from '../../types.js';
 export const createContact = createTool({
   id: 'create_contact',
   description:
-    '整理一条创建联系人的记录：姓名必填，其余字段能确定就填。这里不写库，不会立刻生效。',
+    '整理一条创建联系人的记录：姓名必填，其余字段能确定就填。',
   inputSchema: z.object({
     name: z.string().min(1).describe('姓名，必填'),
     phone: z.string().optional().describe('手机号或座机'),
@@ -16,7 +16,7 @@ export const createContact = createTool({
     position: z.string().optional().describe('职位'),
     project: z.string().optional().describe('正在合作或讨论的项目'),
     relation: z.string().optional().describe('关系，如 客户、供应商、前同事'),
-    reason: z.string().optional().describe('为什么要建这条记录，只复述输入里的原话'),
+    reason: z.string().optional().describe('这次记录的原因：一句话说明起因，引用输入里的原话；没有依据就留空'),
   }),
   execute: async (input) => {
     const existed = await findContactByName(input.name);
